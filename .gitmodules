@@ -1,0 +1,3 @@
+[submodule "byt5"]
+	path = byt5
+	url = https://github.com/google-research/byt5
