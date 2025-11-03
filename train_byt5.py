@@ -5,7 +5,10 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup, AdamW
+from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
+from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
+from torch.optim import AdamW
+
 from gpu_selector import get_device
 
 class ByteChunksDataset(Dataset):
