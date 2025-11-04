@@ -31,18 +31,18 @@ class ByteChunksDataset(Dataset):
       Se add_special_tokens=True, il tokenizer aggiunge i token speciali necessari e
       troncando/padding si garantisce una lunghezza fissa. 
     """
-    def __init__(self, x_bytes: np.ndarray, y: np.ndarray, tokenizer, max_length: int = 2048):
+    def __init__(self, x_bytes: torch.Tensor, y: torch.Tensor, tokenizer:AutoTokenizer, max_length: int = 2048):
         # Controlli di integrità su tipo e dimensionalità dei dati
-        assert isinstance(x_bytes, np.ndarray) and x_bytes.dtype == np.uint8 and x_bytes.ndim == 2, \
-            "x_bytes deve essere np.ndarray uint8 di shape (N, 2048)"
-        assert isinstance(y, np.ndarray) and y.dtype == np.int64 and y.ndim == 1, \
-            "y deve essere np.ndarray int64 di shape (N,)"
+        assert isinstance(x_bytes,  torch.Tensor) and x_bytes.dtype == torch.uint8 and x_bytes.ndim == 2, \
+            "x_bytes deve essere  torch.Tensor uint8 di shape (N, 2048)"
+        assert isinstance(y,  torch.Tensor) and y.dtype == torch.int64 and y.ndim == 1, \
+            "y deve essere  torch.Tensor int64 di shape (N,)"
         assert x_bytes.shape[0] == y.shape[0], \
             "X e y devono avere lo stesso numero di campioni"
-        self.x = x_bytes
-        self.y = y
-        self.tok = tokenizer
-        self.max_length = max_length
+        self.x:torch.Tensor = x_bytes
+        self.y:torch.Tensor = y
+        self.tok:AutoTokenizer = tokenizer
+        self.max_length:int = max_length
 
     def __len__(self):
         # Numero di campioni totali
@@ -101,10 +101,10 @@ def make_dataloaders(data_dir, tokenizer, batch_size=32, max_length=2048, num_wo
     - pin_memory=True velocizza il trasferimento CPU->GPU.
     - shuffle=True sul train per mescolare gli esempi ad ogni epoca.
     """
-    X_train = np.load(os.path.join(data_dir, "X_train.npy")).astype(np.uint8, copy=False)
-    y_train = np.load(os.path.join(data_dir, "y_train.npy")).astype(np.int64, copy=False)
-    X_test  = np.load(os.path.join(data_dir, "X_test.npy")).astype(np.uint8, copy=False)
-    y_test  = np.load(os.path.join(data_dir, "y_test.npy")).astype(np.int64, copy=False)
+    X_train:torch.Tensor = torch.from_numpy(np.load(os.path.join(data_dir, "X_train.npy")).astype(np.uint8, copy=False))
+    y_train:torch.Tensor = torch.from_numpy(np.load(os.path.join(data_dir, "y_train.npy")).astype(np.int64, copy=False))
+    X_test:torch.Tensor  = torch.from_numpy(np.load(os.path.join(data_dir, "X_test.npy")).astype(np.uint8, copy=False))
+    y_test:torch.Tensor  = torch.from_numpy(np.load(os.path.join(data_dir, "y_test.npy")).astype(np.int64, copy=False))
 
     train_ds = ByteChunksDataset(X_train, y_train, tokenizer, max_length=max_length)
     val_ds   = ByteChunksDataset(X_test,  y_test,  tokenizer, max_length=max_length)
