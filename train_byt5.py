@@ -4,6 +4,7 @@ import os, json, time, argparse
 import numpy as np
 import torch
 from torch import nn
+from torch.amp import GradScaler, autocast
 from torch.utils.data import Dataset, DataLoader
 from transformers import T5EncoderModel, AutoTokenizer, get_linear_schedule_with_warmup
 from torch.optim import AdamW
@@ -31,7 +32,7 @@ class ByteChunksDataset(Dataset):
       Se add_special_tokens=True, il tokenizer aggiunge i token speciali necessari e
       troncando/padding si garantisce una lunghezza fissa. 
     """
-    def __init__(self, x_bytes: torch.Tensor, y: torch.Tensor, tokenizer:AutoTokenizer, max_length: int = 2048):
+    def __init__(self, x_bytes: torch.Tensor, y: torch.Tensor, tokenizer:AutoTokenizer, max_length: int = 2050):
         # Controlli di integrità su tipo e dimensionalità dei dati
         assert isinstance(x_bytes,  torch.Tensor) and x_bytes.dtype == torch.uint8 and x_bytes.ndim == 2, \
             "x_bytes deve essere  torch.Tensor uint8 di shape (N, 2048)"
@@ -88,7 +89,7 @@ class ByteChunksDataset(Dataset):
         item = {
             "input_ids": enc["input_ids"].squeeze(0),       # LongTensor [L]
             "attention_mask": enc["attention_mask"].squeeze(0),  # LongTensor [L]
-            "labels": torch.tensor(self.y[idx], dtype=torch.long)  # LongTensor []
+            "labels": torch.as_tensor(self.y[idx], dtype=torch.long)  # LongTensor []
         }
         return item
 
@@ -113,6 +114,13 @@ def make_dataloaders(data_dir, tokenizer, batch_size=32, max_length=2048, num_wo
         train_ds, batch_size=batch_size, shuffle=True,
         num_workers=num_workers, pin_memory=True
     )
+    # Sanity check input
+    b = next(iter(train_loader))
+    print("ids range:", b["input_ids"].min().item(), b["input_ids"].max().item())
+    print("mask sum (first 8):", b["attention_mask"].sum(dim=1)[:8])
+    print("labels dist:", torch.bincount(b["labels"]).tolist())
+    del b
+    
     val_loader = DataLoader(
         val_ds, batch_size=batch_size, shuffle=False,
         num_workers=num_workers, pin_memory=True
@@ -183,7 +191,7 @@ class ByT5EncoderForClassification(nn.Module):
             loss_fn = nn.BCEWithLogitsLoss()
             loss = loss_fn(logits, labels.float())
 
-        return {"loss": loss, "logits": logits}
+        return {"logits": logits}
 
 # Esempio di istanziazione del modello a partire da un checkpoint locale:
 def build_byt5_classifier(model_dir: str, pooling: str = "mean"):
@@ -196,6 +204,11 @@ def build_byt5_classifier(model_dir: str, pooling: str = "mean"):
     # Riusa la tua testa di classificazione 
     model = ByT5EncoderForClassification(encoder, hidden_size, num_labels=1, pooling=pooling)
     
+    # Inizializza la testa per stabilità
+    nn.init.trunc_normal_(model.classifier.weight, std=0.02)
+    nn.init.zeros_(model.classifier.bias)
+
+
     # Tokenizer: per il byte-level di byt5
     tokenizer = AutoTokenizer.from_pretrained(model_dir, use_fast=False)  # tokenizer byte-level
     return model, tokenizer
@@ -264,6 +277,7 @@ def train(args):
     - Scheduler lineare con warmup per stabilità dell'ottimizzazione. [file:2]
     - Early stopping su validation loss, salvataggio del best checkpoint. [file:2]
     """
+    
     # 1) Scelta del dispositivo (GPU del cluster o fallback CPU)
     try:
         device_str = get_device()  # e.g. 'cuda:0'; termina se non disponibile
@@ -291,19 +305,41 @@ def train(args):
     )
 
     # 4) Ottimizzatore e scheduler
-    optimizer = AdamW(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+    if args.freeze_encoder:
+    # Solo head
+        optimizer = AdamW([
+            {"params": model.classifier.parameters(), "lr": 1e-3, "weight_decay": 0.0},
+        ])
+    else:
+        # Fine-tuning completo
+        head_params = list(model.classifier.parameters())
+        base_params = [p for n, p in model.named_parameters() if p.requires_grad and "classifier" not in n]
+        optimizer = AdamW([
+            {"params": base_params, "lr": args.lr, "weight_decay": 0.01},
+            {"params": head_params, "lr": 5e-4, "weight_decay": 0.0},
+        ])
+
+
     total_steps = len(train_loader) * args.epochs
-    warmup_steps = int(total_steps * args.warmup_ratio)
+    warmup_steps = int(total_steps * 0.1)  # più conservativo
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
     # 5) Mixed precision (attivo solo su CUDA)
-    use_amp = (device.type == "cuda")
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
-
+    use_amp = (device.type == "cuda") and (not args.no_amp)
+    scaler = GradScaler(device="cuda", enabled=use_amp)
     # 6) Early stopping
     best_val = float("inf")
     patience = 0
     os.makedirs(args.out_dir, exist_ok=True)
+
+    # Estrai tutte le label train dal dataset per calcolare il peso
+    y_train_all = train_loader.dataset.y  # è un torch.Tensor int64
+    N_pos = int((y_train_all == 1).sum().item())
+    N_neg = int((y_train_all == 0).sum().item())
+    pos_w = (N_neg / max(1, N_pos)) if N_pos > 0 else 1.0
+    bce = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_w], device=device))
+    print(f"pos_weight={pos_w:.3f}")
+
 
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -320,9 +356,10 @@ def train(args):
             optimizer.zero_grad(set_to_none=True)
 
             # Forward in fp16 (autocast) se su CUDA
-            with torch.cuda.amp.autocast(enabled=use_amp):
+            with autocast(device_type="cuda", enabled=use_amp, dtype=torch.float16):
                 out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                loss = out["loss"]
+                logits = out["logits"].clamp(-20, 20)  # stabilità numerica
+                loss = bce(logits, labels.float())
 
             # Backprop con GradScaler per stabilità numerica in fp16
             scaler.scale(loss).backward()
@@ -346,7 +383,7 @@ def train(args):
                 input_ids = batch["input_ids"].to(device, non_blocking=True)
                 attention_mask = batch["attention_mask"].to(device, non_blocking=True)
                 labels = batch["labels"].to(device, non_blocking=True)
-                with torch.cuda.amp.autocast(enabled=use_amp):
+                with autocast(device_type="cuda", enabled=use_amp, dtype=torch.float16):
                     out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
                 val_loss += out["loss"].item()
                 all_logits.append(out["logits"].detach().cpu())
@@ -412,6 +449,7 @@ def parse_args():
     ap.add_argument("--freeze_encoder", action="store_true")
     ap.add_argument("--num_workers", type=int, default=2)
     ap.add_argument("--patience", type=int, default=3)
+    ap.add_argument("--no_amp", action="store_true")
 
     return ap.parse_args()
 
