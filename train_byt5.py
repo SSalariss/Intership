@@ -5,8 +5,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import Dataset, DataLoader
-from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
-from transformers import AutoModel, AutoTokenizer, get_linear_schedule_with_warmup
+from transformers import T5EncoderModel, AutoTokenizer, get_linear_schedule_with_warmup
 from torch.optim import AdamW
 
 from gpu_selector import get_device
@@ -144,7 +143,7 @@ class ByT5EncoderForClassification(nn.Module):
         - pooling: 'mean' (consigliato) oppure 'cls'. 
         """
         super().__init__()
-        self.encoder = encoder_model
+        self.encoder = encoder_model # t5encoderModel
         self.pooling = pooling
         self.classifier = nn.Linear(hidden_size, num_labels)
 
@@ -191,9 +190,13 @@ def build_byt5_classifier(model_dir: str, pooling: str = "mean"):
     """
     Carica AutoModel (encoder) e restituisce il wrapper con classification head.
     """
-    encoder = AutoModel.from_pretrained(model_dir)           # carica l'encoder ByT5
+    encoder = T5EncoderModel.from_pretrained(model_dir)           # carica l'encoder ByT5
     hidden_size = encoder.config.d_model                     # dimensione d_model
+    
+    # Riusa la tua testa di classificazione 
     model = ByT5EncoderForClassification(encoder, hidden_size, num_labels=1, pooling=pooling)
+    
+    # Tokenizer: per il byte-level di byt5
     tokenizer = AutoTokenizer.from_pretrained(model_dir, use_fast=False)  # tokenizer byte-level
     return model, tokenizer
 
