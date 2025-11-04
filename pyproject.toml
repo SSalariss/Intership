@@ -8,6 +8,8 @@ dependencies = [
     "numpy>=2.3.4",
     "scikit-learn>=1.7.2",
     "torch>=2.9.0",
+    "torchaudio>=2.9.0",
+    "torchvision>=0.24.0",
     "transformers>=4.57.1",
 ]
 
