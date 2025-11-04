@@ -385,8 +385,10 @@ def train(args):
                 labels = batch["labels"].to(device, non_blocking=True)
                 with autocast(device_type="cuda", enabled=use_amp, dtype=torch.float16):
                     out = model(input_ids=input_ids, attention_mask=attention_mask, labels=labels)
-                val_loss += out["loss"].item()
-                all_logits.append(out["logits"].detach().cpu())
+                    logits = out["logits"].clamp(-20, 20)
+                    loss = bce(logits, labels.float())
+                val_loss += loss.item()
+                all_logits.append(logits.detach().cpu())
                 all_labels.append(labels.detach().cpu())
 
         val_loss /= max(1, len(val_loader))
