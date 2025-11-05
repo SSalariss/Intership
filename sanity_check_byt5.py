@@ -41,6 +41,9 @@ model.to(DEVICE)
 # === DATASET + DATALOADER ===
 ds = ByteChunksDataset(X_train, y_train, tokenizer, max_length=MAX_LEN)
 dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True)
+sample = ds[0]
+print("Esempio tokenizzato:", sample["input_ids"][:20])
+print("Label:", sample["labels"])
 
 # === OPTIMIZER ===
 optimizer = AdamW(model.parameters(), lr=5e-4)  # più alto
