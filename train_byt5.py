@@ -118,7 +118,7 @@ def train(args):
     warmup_steps = max(1, int(total_steps * 0.1))  # evita 0
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
-    #scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and not args.no_amp))
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and not args.no_amp))
     best_val_loss = float("inf")
     patience_counter = 0
 
@@ -135,10 +135,10 @@ def train(args):
             logits, loss = model(input_ids, attn_mask, labels)
 
             loss.backward()
-            #scaler.scale(loss).backward()
-            optimizer.step()
-            #scaler.step(optimizer)
-            #scaler.update()
+            scaler.scale(loss).backward()
+            #optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
 
             total_loss += loss.item() * len(labels)
