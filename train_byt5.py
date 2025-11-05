@@ -49,10 +49,10 @@ def make_dataloaders(
     """
     Carica i file .npy e restituisce DataLoader train/test
     """
-    X_train = torch.from_numpy(np.load(os.path.join(data_dir, "X_train.npy")).astype(np.uint8))
-    y_train = torch.from_numpy(np.load(os.path.join(data_dir, "y_train.npy")).astype(np.int64))
-    X_test  = torch.from_numpy(np.load(os.path.join(data_dir, "X_test.npy")).astype(np.uint8))
-    y_test  = torch.from_numpy(np.load(os.path.join(data_dir, "y_test.npy")).astype(np.int64))
+    X_train = torch.from_numpy(np.load(os.path.join(data_dir, "X_train.npy")).astype(np.uint8))[:4000]
+    y_train = torch.from_numpy(np.load(os.path.join(data_dir, "y_train.npy")).astype(np.int64))[:4000]
+    X_test  = torch.from_numpy(np.load(os.path.join(data_dir, "X_test.npy")).astype(np.uint8))[:1000]
+    y_test  = torch.from_numpy(np.load(os.path.join(data_dir, "y_test.npy")).astype(np.int64))[:1000]
 
     print(f"[INFO] X_train shape: {X_train.shape}, X_test shape: {X_test.shape}")
     print(f"[INFO] Label dist train: {y_train.sum().item()} / {len(y_train)} positivi")
@@ -118,7 +118,7 @@ def train(args):
     warmup_steps = max(1, int(total_steps * 0.1))  # evita 0
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
-    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and not args.no_amp))
+    #scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and not args.no_amp))
     best_val_loss = float("inf")
     patience_counter = 0
 
@@ -131,12 +131,14 @@ def train(args):
             attn_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
 
-            with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and not args.no_amp)):
-                logits, loss = model(input_ids, attn_mask, labels)
+            #with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and not args.no_amp)):
+            logits, loss = model(input_ids, attn_mask, labels)
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            loss.backward()
+            #scaler.scale(loss).backward()
+            optimizer.step()
+            #scaler.step(optimizer)
+            #scaler.update()
             scheduler.step()
 
             total_loss += loss.item() * len(labels)
