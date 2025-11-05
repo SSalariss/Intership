@@ -131,10 +131,12 @@ def train(args):
             attn_mask = batch["attention_mask"].to(device)
             labels = batch["labels"].to(device)
 
-            #with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and not args.no_amp)):
-            logits, loss = model(input_ids, attn_mask, labels)
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and not args.no_amp)):
+                logits, loss = model(input_ids, attn_mask, labels)
 
-            loss.backward()
+            #logits, loss = model(input_ids, attn_mask, labels)
+
+            #loss.backward()
             scaler.scale(loss).backward()
             #optimizer.step()
             scaler.step(optimizer)
