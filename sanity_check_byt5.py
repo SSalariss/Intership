@@ -9,10 +9,12 @@ from torch.optim import AdamW
 DATA_DIR = "./artifacts"
 MODEL_DIR = "google/byt5-small"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MAX_LEN = 2048
-BATCH_SIZE = 8
+MAX_LEN = 512      
+BATCH_SIZE = 2     # ridotto da 8
 EPOCHS = 3
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.cuda.empty_cache()
 print(f"Using {DEVICE}")
 
 # === CARICA I DATI ===
