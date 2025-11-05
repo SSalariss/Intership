@@ -75,7 +75,7 @@ class ByteChunksDataset(Dataset):
         # Tokenizzazione per ByT5:
         # - add_special_tokens: permette di includere eventuali token speciali richiesti dal modello.
         # - padding="max_length": garantisce batch con sequenze di lunghezza uniforme (essenziale per GPU).
-        # - truncation=True: se per qualche motivo la stringa superasse max_length, viene tronca (non dovrebbe in questo caso).
+        # - truncation=True: se per qualche motivo la stringa superasse max_length, viene troncato (non dovrebbe in questo caso).
         # - return_tensors="pt": ritorna tensori PyTorch pronti per il DataLoader.
         enc = self.tok(
             text,
@@ -145,10 +145,10 @@ class ByT5EncoderForClassification(nn.Module):
         """
         Parametri:
         - encoder_model: istanza di AutoModel caricata da un checkpoint ByT5 (es. google/byt5-small).
-          AutoModel restituisce last_hidden_state dell'encoder (non serve il decoder per classificazione). [file:2]
+          AutoModel restituisce last_hidden_state dell'encoder (non serve il decoder per classificazione). 
         - hidden_size: dimensione d_model del ByT5 (presa da encoder.config.d_model).
-        - num_labels: 1 per binario (logit singolo); se multi-classe, impostare al numero di classi e usare CrossEntropy. [file:2]
-        - pooling: 'mean' (consigliato) oppure 'cls'. 
+        - num_labels: 1 per binario (logit singolo); se multi-classe, impostare al numero di classi e usare CrossEntropy. 
+        - pooling: 'mean'  oppure 'cls'. 
         """
         super().__init__()
         self.encoder = encoder_model # t5encoderModel
@@ -158,14 +158,14 @@ class ByT5EncoderForClassification(nn.Module):
     def forward(self, input_ids, attention_mask, labels=None):
         """
         Input:
-        - input_ids: LongTensor [B, L] prodotto dal tokenizer ByT5 a partire dai byte. [file:2]
-        - attention_mask: LongTensor [B, L] con 1 dove il token è valido (non pad). [file:2]
-        - labels: LongTensor [B] con 0/1. Se fornito, calcoliamo la loss. [file:2]
+        - input_ids: LongTensor [B, L] prodotto dal tokenizer ByT5 a partire dai byte. 
+        - attention_mask: LongTensor [B, L] con 1 dove il token è valido (non pad). 
+        - labels: LongTensor [B] con 0/1. Se fornito, calcoliamo la loss. 
 
         Output:
         - dict con:
           - 'loss' (se labels presenti): BCEWithLogitsLoss su logit singolo.
-          - 'logits': Tensor [B] con i logit grezzi (prima di sigmoid). [file:2]
+          - 'logits': Tensor [B] con i logit grezzi (prima di sigmoid). 
         """
         # Esegue il forward dell'encoder ByT5 e ottiene le hidden states per token: [B, L, H]
         outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
@@ -219,9 +219,9 @@ def compute_metrics(logits: torch.Tensor, labels: torch.Tensor, threshold: float
     Calcola metriche standard per classificazione binaria.
 
     Parametri:
-    - logits: Tensor [N] con i logit grezzi (uscita della testa prima della sigmoid). [file:2]
-    - labels: Tensor [N] con etichette 0/1 (dtype long o int). [file:2]
-    - threshold: soglia di decisione sulla probabilità della classe positiva. [file:2]
+    - logits: Tensor [N] con i logit grezzi (uscita della testa prima della sigmoid). 
+    - labels: Tensor [N] con etichette 0/1 (dtype long o int). 
+    - threshold: soglia di decisione sulla probabilità della classe positiva. 
 
     Passi:
     1) Applica sigmoid ai logit per ottenere probabilità p = P(y=1 | x).
@@ -230,11 +230,11 @@ def compute_metrics(logits: torch.Tensor, labels: torch.Tensor, threshold: float
        - accuracy = fractione di predizioni corrette.
        - precision = TP / (TP + FP) (quanto sono “pulite” le positive). 
        - recall = TP / (TP + FN) (quante positive vere vengono recuperate).
-       - F1 = media armonica tra precision e recall (equilibrio tra le due). [file:2]
+       - F1 = media armonica tra precision e recall (equilibrio tra le due). 
 
     Note:
     - Aggiungiamo un piccolo epsilon (1e-9) al denominatore per evitare divisioni per zero
-      in casi limite (es. nessuna predizione positiva). [file:2]
+      in casi limite (es. nessuna predizione positiva). 
     """
     with torch.no_grad():
         # 1) Probabilità dalla sigmoid
@@ -272,10 +272,10 @@ def train(args):
     Esegue il fine-tuning di ByT5 per classificazione binaria su frammenti di 2048 byte.
 
     Caratteristiche:
-    - Selezione automatica della GPU libera sul cluster (get_device). [file:2]
-    - Mixed precision (autocast + GradScaler) per ridurre memoria VRAM e accelerare. [file:2]
-    - Scheduler lineare con warmup per stabilità dell'ottimizzazione. [file:2]
-    - Early stopping su validation loss, salvataggio del best checkpoint. [file:2]
+    - Selezione automatica della GPU libera sul cluster (get_device). 
+    - Mixed precision (autocast + GradScaler) per ridurre memoria VRAM e accelerare. 
+    - Scheduler lineare con warmup per stabilità dell'ottimizzazione. 
+    - Early stopping su validation loss, salvataggio del best checkpoint. 
     """
     
     # 1) Scelta del dispositivo (GPU del cluster o fallback CPU)
@@ -422,19 +422,19 @@ import os
 def parse_args():
     """
     Parametri principali:
-    - data_dir: cartella con X_train.npy, y_train.npy, X_test.npy, y_test.npy (artifact generati dallo streaming). [file:2]
-    - model_dir: checkpoint locale di ByT5 (es. google/byt5-small scaricato). [file:2]
-    - out_dir: cartella per checkpoint e report del training. [file:2]
-    - batch_size: esempi per batch (aumenta su GPU con più VRAM, riduci se OOM). [file:2]
-    - epochs: numero di epoche. [file:2]
-    - lr: learning rate (5e-5 per fine-tuning encoder; se alleni solo la head, 1e-3 può essere ok). [file:2]
-    - warmup_ratio: frazione dei passi totali usata per warmup del LR. [file:2]
-    - weight_decay: regolarizzazione L2. [file:2]
-    - max_grad_norm: clipping dei gradienti. [file:2]
-    - max_length: lunghezza sequenza ByT5 (2048 per un chunk da 2KB). [file:2]
-    - pooling: 'mean' o 'cls' per la riduzione [L,H] -> [H]. [file:2]
-    - freeze_encoder: se presente, allena solo la testa di classificazione nella prima run. [file:2]
-    - num_workers: processi di prefetch dei DataLoader; 2-4 su cluster è spesso un buon compromesso. [file:2]
+    - data_dir: cartella con X_train.npy, y_train.npy, X_test.npy, y_test.npy (artifact generati dallo streaming). 
+    - model_dir: checkpoint locale di ByT5 (es. google/byt5-small scaricato). 
+    - out_dir: cartella per checkpoint e report del training. 
+    - batch_size: esempi per batch (aumenta su GPU con più VRAM, riduci se OOM). 
+    - epochs: numero di epoche. 
+    - lr: learning rate (5e-5 per fine-tuning encoder; se alleni solo la head, 1e-3 può essere ok). 
+    - warmup_ratio: frazione dei passi totali usata per warmup del LR. 
+    - weight_decay: regolarizzazione L2.
+    - max_grad_norm: clipping dei gradienti.
+    - max_length: lunghezza sequenza ByT5 (2048 per un chunk da 2KB). 
+    - pooling: 'mean' o 'cls' per la riduzione [L,H] -> [H]. 
+    - freeze_encoder: se presente, allena solo la testa di classificazione nella prima run. 
+    - num_workers: processi di prefetch dei DataLoader; 2-4 su cluster è spesso un buon compromesso. 
     """
     ap = argparse.ArgumentParser(description="Fine-tuning ByT5 (byte-level) per classificazione binaria")
     ap.add_argument("--data_dir", type=str, default="./artifacts")

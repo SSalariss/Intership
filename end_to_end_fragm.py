@@ -6,32 +6,48 @@ from sklearn.model_selection import train_test_split
 from preprocessing.fragmentation import FileChunker, list_files
 
 def iter_dir_chunks(dir_path: str, chunker: FileChunker, exts):
+    """
+    Itera tutti i file in dir_path (filtrati per estensioni) e produce chunk di byte.
+    Usa FileChunker per leggere i file a blocchi senza caricarli interamente in RAM.
+    """
     files = list_files(dir_path, exts=exts)
     for fp in files:
+        # per ogni file, genera sequenzialmente i blocchi di dimensione fissa        
         for ch in chunker.iter_file_chunks(fp):
-            yield ch
+            yield ch # restituisce i chunk come stream di byte
 
 def build_raw_bytes_streaming(pdf_dir, enc_dir, per_class_samples, out_dir,
                               chunk_size=2048, seed=42, pdf_ext=".pdf", enc_ext=".bin"):
+    """
+    Costruisce un dataset bilanciato di frammenti di byte (encrypted vs pdf) in modalità streaming.
+    - Legge chunk di dimensione fissa dai file delle due directory.
+    - Scrive i campioni in memmap su disco per minimizzare l'uso di RAM.
+    - Esegue shuffle e split 80/20 e salva .npy finali più metadata.json.
+    """
     import numpy as np, os
     os.makedirs(out_dir, exist_ok=True)
     rng = np.random.default_rng(seed)
+
+    # Chunker che garantisce blocchi esattamente di chunk_size (droppa l’ultimo incompleto)   
     chunker = FileChunker(chunk_size=chunk_size, drop_last_incomplete=True, seed=seed)
 
-    n_per_cls = per_class_samples
-    n_total = n_per_cls * 2
+    n_per_cls = per_class_samples   # numero di campioni per ciascuna classe
+    n_total = n_per_cls * 2         # due classi: encrypted e pdf
 
+    # File memmap temporanei per scrivere progressivamente senza caricare tutto in RAM
     X_mm_path = os.path.join(out_dir, "X_all_mm.dat")
     y_mm_path = os.path.join(out_dir, "y_all_mm.dat")
     X_mm = np.memmap(X_mm_path, dtype=np.uint8, mode="w+", shape=(n_total, chunk_size))
     y_mm = np.memmap(y_mm_path, dtype=np.int64, mode="w+", shape=(n_total,))
 
+    # Riempie i memmap leggendo a chunk dalle due directory e assegnando le etichette
     write_ptr = 0
     for label, (dir_path, ext) in enumerate([(enc_dir, enc_ext), (pdf_dir, pdf_ext)]):
-        taken = 0
+        taken = 0 # numero di chunk presi
         for ch in iter_dir_chunks(dir_path, chunker, exts=[ext] if ext else None):
+            # da buffer di byte in array uint8 di lunghezza |chunk|
             X_mm[write_ptr, :] = np.frombuffer(ch, dtype=np.uint8, count=chunk_size)
-            y_mm[write_ptr] = label
+            y_mm[write_ptr] = label # etichetta: 0=encrypted, 1=pdf
             write_ptr += 1
             taken += 1
             if taken >= n_per_cls:
@@ -39,6 +55,7 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, per_class_samples, out_dir,
         if taken < n_per_cls:
             raise ValueError(f"Classe {label}: trovati solo {taken} chunk, servono {n_per_cls}")
 
+    # Randomizer
     idx = np.arange(n_total)
     rng.shuffle(idx)
 
@@ -47,11 +64,15 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, per_class_samples, out_dir,
     train_idx = idx[test_size:]
 
     def save_split(indices, x_path, y_path, block=8192):
+        """
+        Copia dal memmap gli esempi selezionati dagli indici in array compatti
+        e salva su disco come .npy, elaborando a blocchi per contenere la RAM.
+        """
         X_out = np.empty((len(indices), chunk_size), dtype=np.uint8)
         y_out = np.empty((len(indices),), dtype=np.int64)
         start = 0
         for i in range(0, len(indices), block):
-            sl = indices[i:i+block]
+            sl = indices[i:i+block] # sottoinsieme di indici
             X_out[start:start+len(sl)] = X_mm[sl]
             y_out[start:start+len(sl)] = y_mm[sl]
             start += len(sl)
@@ -67,6 +88,10 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, per_class_samples, out_dir,
 
 
 def parse_args():
+    """
+    Definisce e parse-a gli argomenti da riga di comando.
+    Nota: max_files_per_class e --streaming sono definiti ma non utilizzati nella funzione principale.
+    """
     p = argparse.ArgumentParser(description="End-to-end (raw bytes): chunking, split, save")
     p.add_argument("--pdf_dir", required=True, type=str)
     p.add_argument("--enc_dir", required=True, type=str)
@@ -82,6 +107,9 @@ def parse_args():
     return p.parse_args()
 
 def main():
+    """
+    Entry point: esegue la pipeline di costruzione del dataset e salva metadati.
+    """
     args = parse_args()
 
     print("Building raw-bytes dataset (streaming, low RAM)...")
