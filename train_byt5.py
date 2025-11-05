@@ -26,8 +26,8 @@ class ByteChunksDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         # ids: 0..255 -> 3..258 per non usare 0/1/2 riservati a pad/eos/unk
-        ids = self.x[idx].to(torch.long) + 3                  # [L]
-        attn = torch.ones(self.L, dtype=torch.long)           # [L]
+        ids = self.x[idx].to(torch.long) + 3                  
+        attn = torch.ones(self.L, dtype=torch.long)           
         label = torch.as_tensor(self.y[idx], dtype=torch.long)
         return {"input_ids": ids, "attention_mask": attn, "labels": label}
 
@@ -85,7 +85,7 @@ def build_byt5_classifier(model_dir: str, pooling: str = "mean") -> ByT5EncoderF
     """
     Carica T5EncoderModel (ByT5) e costruisce la testa di classificazione. 
     """
-    encoder = T5EncoderModel.from_pretrained(model_dir)
+    encoder = T5EncoderModel.from_pretrained("google/byt5-small")
     hidden_size = encoder.config.d_model
     model = ByT5EncoderForClassification(encoder, hidden_size, num_labels=1, pooling=pooling)
     return model
