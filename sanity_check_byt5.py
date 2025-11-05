@@ -11,7 +11,7 @@ MODEL_DIR = "google/byt5-small"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MAX_LEN = 512      
 BATCH_SIZE = 2     # ridotto da 8
-EPOCHS = 3
+EPOCHS = 10  
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 torch.cuda.empty_cache()
@@ -40,7 +40,7 @@ ds = ByteChunksDataset(X_train, y_train, tokenizer, max_length=MAX_LEN)
 dl = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True)
 
 # === OPTIMIZER ===
-optimizer = AdamW(model.parameters(), lr=1e-4)
+optimizer = AdamW(model.parameters(), lr=5e-4)  # più alto
 loss_fn = nn.BCEWithLogitsLoss()
 
 # === TRAIN LOOP ===
