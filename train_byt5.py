@@ -49,8 +49,8 @@ def make_dataloaders(
     """
     Carica i file .npy e restituisce DataLoader train/test
     """
-    X_train = torch.from_numpy(np.load(os.path.join(data_dir, "X_train.npy")).astype(np.uint8))[:4000]
-    y_train = torch.from_numpy(np.load(os.path.join(data_dir, "y_train.npy")).astype(np.int64))[:4000]
+    X_train = torch.from_numpy(np.load(os.path.join(data_dir, "X_train.npy")).astype(np.uint8))[:2000]
+    y_train = torch.from_numpy(np.load(os.path.join(data_dir, "y_train.npy")).astype(np.int64))[:2000]
     X_test  = torch.from_numpy(np.load(os.path.join(data_dir, "X_test.npy")).astype(np.uint8))[:1000]
     y_test  = torch.from_numpy(np.load(os.path.join(data_dir, "y_test.npy")).astype(np.int64))[:1000]
 
