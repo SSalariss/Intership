@@ -33,6 +33,9 @@ tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, use_fast=False)
 encoder = T5EncoderModel.from_pretrained(MODEL_DIR)
 hidden_size = encoder.config.d_model
 model = ByT5EncoderForClassification(encoder, hidden_size, num_labels=1, pooling="mean")
+print("Encoder grad status:", next(model.encoder.parameters()).requires_grad)
+print("Classifier grad status:", next(model.classifier.parameters()).requires_grad)
+
 model.to(DEVICE)
 
 # === DATASET + DATALOADER ===
