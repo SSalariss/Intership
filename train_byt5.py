@@ -402,6 +402,7 @@ def train(args):
         # 8) Early stopping & checkpoint
         if val_loss < best_val - 1e-6:
             best_val = val_loss
+            print("DEBUG val_loss", val_loss)
             patience = 0
             torch.save(model.state_dict(), os.path.join(args.out_dir, "byt5_cls_best.pt"))
         else:
