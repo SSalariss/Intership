@@ -1,258 +1,201 @@
 # train_byt5.py
-from typing import Tuple, Dict, Any
-import os, json, time, argparse
+import os
+import math
 import numpy as np
 import torch
-from torch import nn
-from torch.amp import GradScaler, autocast
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from transformers import T5EncoderModel, get_linear_schedule_with_warmup
-from torch.optim import AdamW
-from gpu_selector import get_device
+from tqdm import tqdm
 
+#Dataset su byte grezzi per ByT5
 class ByteChunksDataset(Dataset):
     """
-    Dataset su byte grezzi per ByT5
+    Dataset che lavora direttamente su byte (uint8).
+    Ogni esempio viene shiftato di +3 per evitare collisioni
+    con i token riservati 0, 1, 2 (pad, eos, unk).
     """
     def __init__(self, x_bytes: torch.Tensor, y: torch.Tensor, chunk_size: int = 2048) -> None:
-        assert x_bytes.dtype == torch.uint8 and x_bytes.ndim == 2 and x_bytes.shape[1] == chunk_size
-        assert y.dtype == torch.int64 and y.ndim == 1 and y.shape[0] == x_bytes.shape[0]
-        self.x: torch.Tensor = x_bytes
-        self.y: torch.Tensor = y
-        self.L: int = chunk_size
+        assert len(x_bytes) == len(y)
+        self.x_bytes = x_bytes
+        self.y = y
+        self.chunk_size = chunk_size
 
-    def __len__(self) -> int:
-        return self.x.shape[0]
+    def __len__(self):
+        return len(self.y)
+    
+    def __getitem__(self, idx):
+        x = self.x_bytes[idx]
+        if len(x) > self.chunk_size:
+            x = x[:self.chunk_size]
 
-    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
-        # ids: 0..255 -> 3..258 per non usare 0/1/2 riservati a pad/eos/unk
-        ids = self.x[idx].to(torch.long) + 3                  
-        attn = torch.ones(self.L, dtype=torch.long)           
-        label = torch.as_tensor(self.y[idx], dtype=torch.long)
-        return {"input_ids": ids, "attention_mask": attn, "labels": label}
-
+        # Shift di +3 per ByT5 (token 0,1,2 riservati)
+        input_ids = torch.tensor(x, dtype=torch.long) + 3
+        attention_mask = torch.ones_like(input_ids)
+        label = torch.tensor(self.y[idx], dtype=torch.long)
+        return {
+            "input_ids": input_ids,
+            "attention_mask": attention_mask,
+            "labels": label
+        }
+    
+# Caricamento del data Loader
 def make_dataloaders(
     data_dir: str,
-    batch_size: int = 32,
-    num_workers: int = 2
-) -> Tuple[DataLoader, DataLoader]:
+    batch_size: int = 2,
+    num_workers: int = 0
+):
     """
-    Carica X/y train e test come uint8/int64, crea Dataset byte-level e DataLoader.  
+    Carica i file .npy e restituisce DataLoader train/test
     """
-    X_train = torch.from_numpy(np.load(os.path.join(data_dir, "X_train.npy")).astype(np.uint8, copy=False))
-    y_train = torch.from_numpy(np.load(os.path.join(data_dir, "y_train.npy")).astype(np.int64, copy=False))
-    X_test  = torch.from_numpy(np.load(os.path.join(data_dir, "X_test.npy" )).astype(np.uint8, copy=False))
-    y_test  = torch.from_numpy(np.load(os.path.join(data_dir, "y_test.npy" )).astype(np.int64, copy=False))
+    X_train = torch.from_numpy(np.load(os.path.join(data_dir, "X_train.npy")).astype(np.uint8))
+    y_train = torch.from_numpy(np.load(os.path.join(data_dir, "y_train.npy")).astype(np.int64))
+    X_test  = torch.from_numpy(np.load(os.path.join(data_dir, "X_test.npy")).astype(np.uint8))
+    y_test  = torch.from_numpy(np.load(os.path.join(data_dir, "y_test.npy")).astype(np.int64))
 
-    train_ds = ByteChunksDataset(X_train, y_train, chunk_size=X_train.shape[1])
-    val_ds   = ByteChunksDataset(X_test,  y_test,  chunk_size=X_test.shape[1])
+    print(f"[INFO] X_train shape: {X_train.shape}, X_test shape: {X_test.shape}")
+    print(f"[INFO] Label dist train: {y_train.sum().item()} / {len(y_train)} positivi")
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=num_workers, pin_memory=True)
-    b = next(iter(train_loader))
-    print("ids range:", b["input_ids"].min().item(), b["input_ids"].max().item())
-    print("mask sum (first 8):", b["attention_mask"].sum(dim=1)[:8])
-    print("labels dist:", torch.bincount(b["labels"]).tolist())
-    del b
-    val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
-    return train_loader, val_loader
+    train_ds = ByteChunksDataset(X_train, y_train)
+    test_ds  = ByteChunksDataset(X_test, y_test)
 
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    test_loader  = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+    return train_loader, test_loader
+
+# Encoder ByT5 + pooling + testa lineare
 class ByT5EncoderForClassification(nn.Module):
-    """
-    Encoder ByT5 + pooling + head lineare; mean pooling con mask e dropout per stabilità.  
-    """
-    def __init__(self, encoder_model: T5EncoderModel, hidden_size: int, num_labels: int = 1, pooling: str = "mean", dropout: float = 0.1) -> None:
+    def __init__(self, encoder, hidden_size, pooling="mean"):
         super().__init__()
-        self.encoder = encoder_model
+        self.encoder = encoder
         self.pooling = pooling
-        self.dropout = nn.Dropout(dropout)
-        self.classifier = nn.Linear(hidden_size, num_labels)
-        nn.init.trunc_normal_(self.classifier.weight, std=0.02)
-        nn.init.zeros_(self.classifier.bias)
+        self.classifier = nn.Linear(hidden_size, 1)
 
-    def forward(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> Dict[str, torch.Tensor]:
-        out = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        last_hidden = out.last_hidden_state  # [B, L, H]
-        if self.pooling == "cls":
-            pooled = last_hidden[:, 0, :]
+    def forward(self, input_ids, attention_mask=None, labels=None):
+        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        hidden_states = outputs.last_hidden_state  # [B, L, H]
+
+        # Pooling semplice (mean o max)
+        if self.pooling == "mean":
+            pooled = (hidden_states * attention_mask.unsqueeze(-1)).sum(1) / attention_mask.sum(1, keepdim=True)
+        elif self.pooling == "max":
+            pooled = hidden_states.masked_fill(attention_mask.unsqueeze(-1) == 0, -1e9).max(1).values
         else:
-            mask = attention_mask.unsqueeze(-1).float()
-            pooled = (last_hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-6)
-        pooled = self.dropout(pooled)
-        logits = self.classifier(pooled).squeeze(-1)  # [B]
-        return {"logits": logits}
+            raise ValueError("Pooling non valido: usa 'mean' o 'max'")
 
-def build_byt5_classifier(model_dir: str, pooling: str = "mean") -> ByT5EncoderForClassification:
-    """
-    Carica T5EncoderModel (ByT5) e costruisce la testa di classificazione. 
-    """
-    encoder = T5EncoderModel.from_pretrained("google/byt5-small")
-    hidden_size = encoder.config.d_model
-    model = ByT5EncoderForClassification(encoder, hidden_size, num_labels=1, pooling=pooling)
-    return model
+        logits = self.classifier(pooled).squeeze(-1)
+        loss = None
+        if labels is not None:
+            loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+        return logits, loss
 
-@torch.no_grad()
-def compute_metrics(logits: torch.Tensor, labels: torch.Tensor, threshold: float = 0.5) -> Dict[str, float]:
-    """
-    Calcola accuracy/precision/recall/F1 da logit e soglia.  
-    """
-    probs = torch.sigmoid(logits)
-    preds = (probs >= threshold).long()
-    labels = labels.long()
-    correct = (preds == labels).sum().item()
-    acc = correct / max(1, labels.numel())
-    tp = ((preds == 1) & (labels == 1)).sum().item()
-    fp = ((preds == 1) & (labels == 0)).sum().item()
-    fn = ((preds == 0) & (labels == 1)).sum().item()
-    precision = tp / (tp + fp + 1e-9)
-    recall    = tp / (tp + fn + 1e-9)
-    f1        = 2 * precision * recall / (precision + recall + 1e-9)
-    return {"accuracy": acc, "precision": precision, "recall": recall, "f1": f1}
+# Costruzione del modello
+def build_byt5_classifier(model_dir="google/byt5-small", freeze_encoder=False, pooling="mean"):
+    print(f"[INFO] Carico modello da {model_dir} ...")
+    encoder = T5EncoderModel.from_pretrained(model_dir)
+    model = ByT5EncoderForClassification(encoder, encoder.config.d_model, pooling)
 
-def pick_best_threshold(logits: torch.Tensor, labels: torch.Tensor) -> Tuple[float, float]:
-    """
-    Sweep su soglie in [0.01,0.99] per massimizzare F1 su validation. 
-    """
-    probs = torch.sigmoid(logits).cpu().numpy()
-    y = labels.cpu().numpy()
-    ths = np.linspace(0.01, 0.99, 200)
-    best_f1, best_th = 0.0, 0.5
-    for t in ths:
-        preds = (probs >= t).astype(np.int32)
-        tp = ((preds==1)&(y==1)).sum()
-        fp = ((preds==1)&(y==0)).sum()
-        fn = ((preds==0)&(y==1)).sum()
-        precision = tp / max(1, tp+fp)
-        recall    = tp / max(1, tp+fn)
-        f1 = 2*precision*recall / max(1e-9, precision+recall)
-        if f1 > best_f1:
-            best_f1, best_th = f1, t
-    return float(best_th), float(best_f1)
-
-def train(args: argparse.Namespace) -> None:
-    # device
-    try:
-        device_str = get_device()
-    except SystemExit:
-        device_str = "cpu"
-    device = torch.device(device_str)
-    print(f"Using device: {device_str}")
-
-    # modello
-    model = build_byt5_classifier(args.model_dir, pooling=args.pooling)
-    model.to(device)
-
-    # (opzionale) congelamento iniziale
-    if args.freeze_encoder:
+    if freeze_encoder:
         for p in model.encoder.parameters():
             p.requires_grad = False
-
-    # dataloader
-    train_loader, val_loader = make_dataloaders(
-        data_dir=args.data_dir,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers
-    )
-
-    # optimizer & scheduler
-    if args.freeze_encoder:
-        optimizer = AdamW([{"params": model.classifier.parameters(), "lr": 1e-3, "weight_decay": 0.0}])
+        print("[INFO] Encoder congelato")
     else:
-        head_params = list(model.classifier.parameters())
-        base_params = [p for n,p in model.named_parameters() if p.requires_grad and "classifier" not in n]
-        optimizer = AdamW([
-            {"params": base_params, "lr": args.lr,   "weight_decay": 0.01},
-            {"params": head_params, "lr": 5e-4,      "weight_decay": 0.0},
-        ])
+        print("[INFO] Encoder allenabile")
 
-    total_steps = max(1, len(train_loader) * args.epochs)
-    warmup_steps = int(total_steps * 0.1)
+    return model
+
+# Training e validazione
+def train(args):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"[INFO] Uso dispositivo: {device}")
+
+    train_loader, test_loader = make_dataloaders(args.data_dir, args.batch_size, args.num_workers)
+    model = build_byt5_classifier(args.model_dir, args.freeze_encoder, args.pooling).to(device)
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    total_steps = len(train_loader) * args.epochs
+    warmup_steps = max(1, int(total_steps * 0.1))  # evita 0
     scheduler = get_linear_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
-    # AMP
-    use_amp = (device.type == "cuda") and (not args.no_amp)
-    scaler = GradScaler(device="cuda", enabled=use_amp)
-
-    # BCE con pos_weight
-    y_train_all = train_loader.dataset.y
-    N_pos = int((y_train_all == 1).sum().item())
-    N_neg = int((y_train_all == 0).sum().item())
-    pos_w = float(N_neg / max(1, N_pos)) if N_pos > 0 else 1.0
-    bce = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([pos_w], device=device))
-    print(f"pos_weight={pos_w:.3f}")
-
-    best_val = float("inf")
-    patience = 0
-    os.makedirs(args.out_dir, exist_ok=True)
+    scaler = torch.cuda.amp.GradScaler(enabled=(device.type == "cuda" and not args.no_amp))
+    best_val_loss = float("inf")
+    patience_counter = 0
 
     for epoch in range(1, args.epochs + 1):
         model.train()
-        running = 0.0
-        start_t = time.time()
+        total_loss, total_correct, total = 0, 0, 0
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch} [Train]"):
+            optimizer.zero_grad()
+            input_ids = batch["input_ids"].to(device)
+            attn_mask = batch["attention_mask"].to(device)
+            labels = batch["labels"].to(device)
 
-        for batch in train_loader:
-            input_ids = batch["input_ids"].to(device, non_blocking=True)
-            attention_mask = batch["attention_mask"].to(device, non_blocking=True)
-            labels = batch["labels"].to(device, non_blocking=True)
-
-            optimizer.zero_grad(set_to_none=True)
-            with autocast(device_type="cuda", enabled=use_amp, dtype=torch.float16):
-                out = model(input_ids=input_ids, attention_mask=attention_mask)
-                logits = out["logits"].clamp(-20, 20)
-                loss = bce(logits, labels.float())
-
-            # guardrail numerico
-            if not torch.isfinite(loss):
-                print("Non-finite loss:", loss.item(), "logits:", logits.min().item(), logits.max().item())
-                raise RuntimeError("Loss is NaN/Inf")
+            with torch.cuda.amp.autocast(enabled=(device.type == "cuda" and not args.no_amp)):
+                logits, loss = model(input_ids, attn_mask, labels)
 
             scaler.scale(loss).backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             scaler.step(optimizer)
             scaler.update()
             scheduler.step()
-            running += loss.item()
 
-        train_loss = running / max(1, len(train_loader))
-        dur = time.time() - start_t
+            total_loss += loss.item() * len(labels)
+            preds = (torch.sigmoid(logits) > 0.5).long()
+            total_correct += (preds == labels).sum().item()
+            total += len(labels)
 
-        # validazione
+        train_loss = total_loss / total
+        train_acc = total_correct / total
+        print(f"Epoch {epoch}: Train loss {train_loss:.4f}, acc {train_acc:.3f}")
+
+       
+        # VALIDAZIONE
         model.eval()
-        val_loss = 0.0
-        all_logits, all_labels = [], []
+        val_loss, val_correct, val_total = 0, 0, 0
         with torch.no_grad():
-            for batch in val_loader:
-                input_ids = batch["input_ids"].to(device, non_blocking=True)
-                attention_mask = batch["attention_mask"].to(device, non_blocking=True)
-                labels = batch["labels"].to(device, non_blocking=True)
-                with autocast(device_type="cuda", enabled=use_amp, dtype=torch.float16):
-                    out = model(input_ids=input_ids, attention_mask=attention_mask)
-                    logits = out["logits"].clamp(-20, 20)
-                    loss = bce(logits, labels.float())
-                if torch.isfinite(loss):
-                    val_loss += loss.item()
-                all_logits.append(logits.detach().cpu())
-                all_labels.append(labels.detach().cpu())
+            for batch in tqdm(test_loader, desc=f"Epoch {epoch} [Val]"):
+                input_ids = batch["input_ids"].to(device)
+                attn_mask = batch["attention_mask"].to(device)
+                labels = batch["labels"].to(device)
 
-        if len(val_loader) > 0:
-            val_loss /= max(1, len(val_loader))
-        logits = torch.cat(all_logits, dim=0)
-        labels = torch.cat(all_labels, dim=0)
-        best_th, _ = pick_best_threshold(logits, labels)
-        metrics = compute_metrics(logits, labels, threshold=best_th)
+                logits, loss = model(input_ids, attn_mask, labels)
+                val_loss += loss.item() * len(labels)
+                preds = (torch.sigmoid(logits) > 0.5).long()
+                val_correct += (preds == labels).sum().item()
+                val_total += len(labels)
 
-        print(f"Epoch {epoch:02d} | time {dur:.1f}s | train {train_loss:.4f} | val {val_loss:.4f} | "
-              f"th {best_th:.3f} | acc {metrics['accuracy']:.4f} f1 {metrics['f1']:.4f} "
-              f"P {metrics['precision']:.4f} R {metrics['recall']:.4f}")
+        val_loss /= val_total
+        val_acc = val_correct / val_total
+        print(f"Epoch {epoch}: Val loss {val_loss:.4f}, acc {val_acc:.3f}")
 
-        if torch.isfinite(torch.tensor(val_loss)) and (val_loss < best_val - 1e-6):
-            best_val = val_loss
-            patience = 0
-            torch.save(model.state_dict(), os.path.join(args.out_dir, "byt5_cls_best.pt"))
+        # Early stopping
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            patience_counter = 0
+            os.makedirs(args.out_dir, exist_ok=True)
+            torch.save(model.state_dict(), os.path.join(args.out_dir, "best_model.pt"))
+            print("Miglior modello salvato.")
         else:
-            patience += 1
-            if patience >= args.patience:
-                print("Early stopping triggered.")
+            patience_counter += 1
+            if patience_counter >= args.patience:
+                print(f"[INFO] Early stopping attivato a epoch {epoch}")
                 break
 
-    with open(os.path.join(args.out_dir, "report.json"), "w") as f:
-        json.dump({"best_val_loss": best_val, "metrics": metrics, "config": vars(args)}, f, indent=2)
+# Main
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_dir", type=str, default="google/byt5-small")
+    parser.add_argument("--data_dir", type=str, required=True)
+    parser.add_argument("--out_dir", type=str, default="./runs")
+    parser.add_argument("--batch_size", type=int, default=2)
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--num_workers", type=int, default=0)
+    parser.add_argument("--freeze_encoder", action="store_true")
+    parser.add_argument("--no_amp", action="store_true")
+    parser.add_argument("--pooling", type=str, default="mean")
+    parser.add_argument("--patience", type=int, default=5)
+    args = parser.parse_args()
+
+    train(args)
