@@ -48,18 +48,18 @@ dict_datasets = {
         "url": "https://drive.google.com/file/d/1mrYs-PQvGISMa_xzhSfbmqrY7uSsgGsj/view?usp=sharing",
         "filename": "enc",
         "ext": "zip",
-        "language": "en",
+        #"language": "en",
         "format": "formatted",
-        "service": "nothing",
+        #"service": "nothing",
 
     },
     "datapdf":{
         "url": "https://drive.google.com/file/d/1h_If9XZNPaals1USaW5uG6gCTKdto1ap/view?usp=sharing",
         "filename": "pdf",
         "ext": "zip",
-        "language": "en",
+        #"language": "en",
         "format": "formatted",
-        "service": "nothing",
+        #"service": "nothing",
 
     },
     "rockyou": {
