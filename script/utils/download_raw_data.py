@@ -50,7 +50,7 @@ dict_datasets = {
         "ext": "zip",
         "language": "en",
         "format": "formatted",
-        "service": "enc",
+        "service": "data1",
 
     },
     "datapdf":{
@@ -59,7 +59,7 @@ dict_datasets = {
         "ext": "zip",
         "language": "en",
         "format": "formatted",
-        "service": "pdf",
+        "service": "data2",
 
     },
     "rockyou": {
