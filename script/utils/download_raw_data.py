@@ -44,7 +44,7 @@ Script used to download the following dataset and extract them to the specific d
 """
 
 dict_datasets = {
-    "dataenc": {
+    "enc": {
         "url": "https://drive.google.com/file/d/1mrYs-PQvGISMa_xzhSfbmqrY7uSsgGsj/view?usp=drive_link",
         "filename": "enc",
         "ext": "zip",
@@ -53,7 +53,7 @@ dict_datasets = {
         "service": "data1",
 
     },
-    "datapdf":{
+    "pdf":{
         "url": "https://drive.google.com/file/d/1h_If9XZNPaals1USaW5uG6gCTKdto1ap/view?usp=sharing",
         "filename": "pdf",
         "ext": "zip",
