@@ -104,8 +104,6 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=4
         if taken == 0:
             raise ValueError(f"Classe {label}: nessun chunk trovato nei file")
 
-
-
     # Randomizer
     idx = np.arange(n_total)
     rng.shuffle(idx)
@@ -114,9 +112,6 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=4
     test_size = int(n_total * 0.2)
     test_idx = idx[:test_size]
     train_idx = idx[test_size:]
-
-  
-
 
     def save_split(indices, x_path, y_path, block=8192):
         """
@@ -176,7 +171,6 @@ def main():
         out_dir=args.out_dir,
         chunk_size=args.chunk_size,
         seed=args.seed,
-        #samples_per_class=20000,
     )
     print(f"Saved raw-bytes dataset to {args.out_dir}")
 
@@ -186,7 +180,6 @@ def main():
         "enc_dir": args.enc_dir,
         "chunk_size": args.chunk_size,
         "seed": args.seed,
-        #"samples_per_class": 20000,
         "dtype": "uint8",
         "split": {"train": 0.8, "test": 0.2},
         "class_names": ["encrypted", "pdf"]
