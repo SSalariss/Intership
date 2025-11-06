@@ -10,7 +10,7 @@ DATA_DIR = "./artifacts"
 MODEL_DIR = "google/byt5-small"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MAX_LEN = 512      
-BATCH_SIZE = 2     # ridotto da 8
+BATCH_SIZE = 32
 EPOCHS = 10  
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,4 +88,4 @@ for epoch in range(1, EPOCHS + 1):
 
     print(f"Epoch {epoch} | loss {avg_loss:.4f} | acc {metrics['accuracy']:.3f} | f1 {metrics['f1']:.3f}")
 
-print("Sanity check completato ✅")
+print("Sanity check completato ")

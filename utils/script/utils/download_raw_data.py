@@ -44,6 +44,24 @@ Script used to download the following dataset and extract them to the specific d
 """
 
 dict_datasets = {
+    "dataenc": {
+        "url": "https://drive.google.com/file/d/1mrYs-PQvGISMa_xzhSfbmqrY7uSsgGsj/view?usp=sharing",
+        "filename": "enc",
+        "ext": "zip",
+        "language": "en",
+        "format": "formatted",
+        "service": "nothing",
+
+    },
+    "datapdf":{
+        "url": "https://drive.google.com/file/d/1h_If9XZNPaals1USaW5uG6gCTKdto1ap/view?usp=sharing",
+        "filename": "pdf",
+        "ext": "zip",
+        "language": "en",
+        "format": "formatted",
+        "service": "nothing",
+
+    },
     "rockyou": {
         "url": "https://drive.google.com/file/d/1XEsAf99H3DmH4ichbH-4yXkb0mSwoADY/view?usp=sharing",
         "filename": "rockyou",
