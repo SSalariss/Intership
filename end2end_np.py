@@ -26,7 +26,7 @@ def count_chunks(directory, chunker, ext):
         count += 1
     return count
 
-def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=42, samples_per_class=20000):
+def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=42): #samples_per_class=20000):
     """
     Costruisce un dataset bilanciato di 20k frammenti per classe (encrypted vs pdf).
     Divide 80/20 in train/test e salva i .npy risultanti.
@@ -38,7 +38,7 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=4
 
     # Chunker che garantisce blocchi esattamente di chunk_size (droppa l’ultimo incompleto)   
     chunker = FileChunker(chunk_size=chunk_size, drop_last_incomplete=True, seed=seed)
-
+    '''
     def collect_random_chunks(dir_path, label, max_samples):
             """Estrae casualmente fino a max_samples chunk da dir_path."""
             chunks = []
@@ -77,8 +77,8 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=4
     np.save(os.path.join(out_dir, "X_test.npy"), X_test)
     np.save(os.path.join(out_dir, "y_test.npy"), y_test)
 
-
     '''
+    
     enc_count = count_chunks(enc_dir, chunker, ".bin")
     pdf_count = count_chunks(pdf_dir, chunker, ".pdf")
     n_total = enc_count + pdf_count # due classi: encrypted e pdf
@@ -115,7 +115,7 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=4
     test_idx = idx[:test_size]
     train_idx = idx[test_size:]
 
-    '''
+  
 
 
     def save_split(indices, x_path, y_path, block=8192):
@@ -176,7 +176,7 @@ def main():
         out_dir=args.out_dir,
         chunk_size=args.chunk_size,
         seed=args.seed,
-        samples_per_class=20000,
+        #samples_per_class=20000,
     )
     print(f"Saved raw-bytes dataset to {args.out_dir}")
 
@@ -186,13 +186,12 @@ def main():
         "enc_dir": args.enc_dir,
         "chunk_size": args.chunk_size,
         "seed": args.seed,
-        "samples_per_class": 20000,
+        #"samples_per_class": 20000,
         "dtype": "uint8",
         "split": {"train": 0.8, "test": 0.2},
         "class_names": ["encrypted", "pdf"]
     }
-    with open(os.path.join(out_dir, "metadata.json"), "w") as f:
-        json.dump(meta, f, indent=2)
+    
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "metadata.json"), "w") as f:
         json.dump(meta, f, indent=2)
