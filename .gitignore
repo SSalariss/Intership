@@ -7,5 +7,6 @@ wheels/
 *.egg-info
 data/enc
 data/pdf
+artifacts
 # Virtual environments
 .venv
