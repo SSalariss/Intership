@@ -28,7 +28,7 @@ def count_chunks(directory, chunker, ext):
 
 def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=42): #samples_per_class=20000):
     """
-    Costruisce un dataset bilanciato di 20k frammenti per classe (encrypted vs pdf).
+    Costruisce un dataset frammenti per classe (encrypted vs pdf).
     Divide 80/20 in train/test e salva i .npy risultanti.
     """
     
@@ -108,7 +108,6 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=4
     idx = np.arange(n_total)
     rng.shuffle(idx)
 
-
     test_size = int(n_total * 0.2)
     test_idx = idx[:test_size]
     train_idx = idx[test_size:]
@@ -143,8 +142,7 @@ def build_raw_bytes_streaming(pdf_dir, enc_dir, out_dir, chunk_size=2048, seed=4
 
 def parse_args():
     """
-    Definisce e parse-a gli argomenti da riga di comando.
-    Nota: max_files_per_class e --streaming sono definiti ma non utilizzati nella funzione principale.
+    Definisce e parsa gli argomenti da riga di comando.
     """
     p = argparse.ArgumentParser(description="End-to-end (raw bytes): chunking, split, save")
     p.add_argument("--pdf_dir", required=True, type=str)
