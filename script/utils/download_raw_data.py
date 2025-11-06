@@ -45,7 +45,7 @@ Script used to download the following dataset and extract them to the specific d
 
 dict_datasets = {
     "dataenc": {
-        "url": "https://drive.google.com/file/d/1mrYs-PQvGISMa_xzhSfbmqrY7uSsgGsj/view?usp=sharing",
+        "url": "https://drive.google.com/file/d/1mrYs-PQvGISMa_xzhSfbmqrY7uSsgGsj/view?usp=drive_link",
         "filename": "enc",
         "ext": "zip",
         "language": "en",
