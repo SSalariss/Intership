@@ -40,7 +40,7 @@ def extract_chunks_from_files(
 
     Args:
         - Lista di path ai file
-        - Lista di Label (0 = BIN, 1 = PDF)
+        - Lista di Label (0 = ENC, 1 = PDF)
         - num_chunks: numero totale di chunk da estrarre
         - chunks_size: dimensione del chunk in byte
 
@@ -58,7 +58,7 @@ def extract_chunks_from_files(
     chunks_per_class = num_chunks // 2
 
     print(f"\nEstrazione {chunks_per_class} chunk per classe...")
-    print(f"File BIN disponibili: {len(bin_files)}")
+    print(f"File ENC disponibili: {len(bin_files)}")
     print(f"File PDF disponibili: {len(pdf_files)}")
 
     def extract_from_class(files, num_chunks, label_value):
@@ -66,7 +66,7 @@ def extract_chunks_from_files(
         labels = []
         chunks_per_file = max(1, num_chunks // len(files))
 
-        pbar = tqdm(files, desc=f"Estrazione {'BIN'if label_value == 0 else 'PDF'}")
+        pbar = tqdm(files, desc=f"Estrazione {'ENC'if label_value == 0 else 'PDF'}")
         for file_path in pbar:
             try:
                 with open(file_path, 'rb') as f:
@@ -107,12 +107,12 @@ def extract_chunks_from_files(
 
     #loggin: stamoa il numero totale di chunk per ogni classe
     print(f"\nTotale chunk estratti: {len(all_chunks)}")
-    print(f"  BIN: {sum(1 for l in all_labels if l == 0)}")
+    print(f"  ENC: {sum(1 for l in all_labels if l == 0)}")
     print(f"  PDF: {sum(1 for l in all_labels if l == 1)}")
 
     return all_chunks, all_labels
 
-# Analisi esplorativa per investigare sull'entropia di bin e pdf
+# Analisi esplorativa per investigare sull'entropia di enc e pdf
 
 def exploratory_analysis(chunks, labels, sample_size=500):
     """Analisi esplorativa dei chunk"""
@@ -165,7 +165,7 @@ def exploratory_analysis(chunks, labels, sample_size=500):
         
         return entropies, ascii_ratios, byte_distributions
     
-    bin_stats = compute_stats(bin_sample, "BIN")
+    bin_stats = compute_stats(bin_sample, "ENC")
     pdf_stats = compute_stats(pdf_sample, "PDF")
     
     # Visualizzazioni: 2 righe, 2 colonne
@@ -178,7 +178,7 @@ def exploratory_analysis(chunks, labels, sample_size=500):
     dell'entropia calcolata su due insiemi di chunk, 
     evidenziando differenze o similitudini nella variabilità informativa dei dati.
     '''
-    axes[0, 0].hist(bin_stats[0], bins=30, alpha=0.6, label='BIN', color='blue', edgecolor='black')
+    axes[0, 0].hist(bin_stats[0], bins=30, alpha=0.6, label='ENC', color='blue', edgecolor='black')
     axes[0, 0].hist(pdf_stats[0], bins=30, alpha=0.6, label='PDF', color='red', edgecolor='black')
     axes[0, 0].set_xlabel('Entropia (bit)')
     axes[0, 0].set_ylabel('Frequenza')
@@ -193,7 +193,7 @@ def exploratory_analysis(chunks, labels, sample_size=500):
     per comprendere meglio la composizione testuale o binaria 
     dei dati nei due insiemi
     '''
-    axes[0, 1].hist(bin_stats[1], bins=30, alpha=0.6, label='BIN', color='blue', edgecolor='black')
+    axes[0, 1].hist(bin_stats[1], bins=30, alpha=0.6, label='ENC', color='blue', edgecolor='black')
     axes[0, 1].hist(pdf_stats[1], bins=30, alpha=0.6, label='PDF', color='red', edgecolor='black')
     axes[0, 1].set_xlabel('ASCII Printable Ratio')
     axes[0, 1].set_ylabel('Frequenza')
@@ -201,22 +201,22 @@ def exploratory_analysis(chunks, labels, sample_size=500):
     axes[0, 1].legend()
     axes[0, 1].grid(alpha=0.3)
     
-    # Distribuzione byte BIN
+    # Distribuzione byte ENC
     '''
     serve a visualizzare la distribuzione media dei valori byte nei chunk 
-    appartenenti alla classe BIN, fornendo un dettaglio più granulare 
+    appartenenti alla classe ENC, fornendo un dettaglio più granulare 
     rispetto agli istogrammi precedenti.
     '''
     axes[1, 0].bar(range(256), bin_stats[2], color='blue', alpha=0.7)
     axes[1, 0].set_xlabel('Valore Byte (0-255)')
     axes[1, 0].set_ylabel('Frequenza Media')
-    axes[1, 0].set_title('Distribuzione Valori Byte - BIN')
+    axes[1, 0].set_title('Distribuzione Valori Byte - ENC')
     axes[1, 0].grid(alpha=0.3)
     
     # Distribuzione byte PDF
     '''
     permette di visualizzare la distribuzione media dei valori di byte 
-    nei chunk appartenenti alla classe PDF, a complemento del grafico della classe BIN, 
+    nei chunk appartenenti alla classe PDF, a complemento del grafico della classe ENC, 
     facilitando il confronto tra le due distribuzioni
     '''
     axes[1, 1].bar(range(256), pdf_stats[2], color='red', alpha=0.7)
@@ -253,8 +253,8 @@ def save_dataset(chunks, labels, output_dir, test_size, seed):
     test_labels = [labels[i] for i in test_indices]
 
     print(f"\n== Split del dataset...")
-    print(f"Train: {len(train_chunks)} chunk ({sum(train_labels)} PDF, {len(train_labels)-sum(train_labels)} BIN)")
-    print(f"Test: {len(test_chunks)} chunk ({sum(test_labels)} PDF, {len(test_labels)-sum(test_labels)} BIN)")
+    print(f"Train: {len(train_chunks)} chunk ({sum(train_labels)} PDF, {len(train_labels)-sum(train_labels)} ENC)")
+    print(f"Test: {len(test_chunks)} chunk ({sum(test_labels)} PDF, {len(test_labels)-sum(test_labels)} ENC)")
 
     train_data = {
         'chunks': train_chunks,
@@ -279,7 +279,7 @@ def save_dataset(chunks, labels, output_dir, test_size, seed):
         'test_size': len(test_chunks),
         'chunk_size': len(chunks[0]),
         'num_classes': 2,
-        'class_names': ['BIN', 'PDF']
+        'class_names': ['ENC', 'PDF']
     }
     with open(os.path.join(output_dir, 'dataset_info.pkl'), 'wb') as f:
         pickle.dump(stats, f)
@@ -292,7 +292,7 @@ def save_dataset(chunks, labels, output_dir, test_size, seed):
 # Lancio del main
 def main():
     
-    BIN_DIR = './data/bin'
+    BIN_DIR = './data/enc'
     PDF_DIR = '.data/pdf'
 
     # Verifica che le directory esistano
