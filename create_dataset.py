@@ -293,7 +293,7 @@ def save_dataset(chunks, labels, output_dir, test_size, seed):
 def main():
     
     BIN_DIR = './data/enc'
-    PDF_DIR = '.data/pdf'
+    PDF_DIR = './data/pdf'
 
     # Verifica che le directory esistano
     if not os.path.exists(BIN_DIR):
