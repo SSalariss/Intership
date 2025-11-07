@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import os
 import pickle
 
-from script.utils.preprocessing_utils import train_test_split
+from sklearn.model_selection import train_test_split
 
 
 
@@ -142,9 +142,9 @@ def exploratory_analysis(chunks, labels, sample_size=500):
             
             # Entropia di Shannon
             hist, _ = np.histogram(byte_array, bins=256, range=(0, 256))
-            hist = hist / len(byte_array) # normalizzazione di hist: la somma degli elementi diventa 1
-            hist = hist[hist > 0] # eliminazione degli zeri per evitare errori nel calcolo
-            entropy = -np.sum(hist * np.log2(hist)) # calcolo dell'entropia sulla distribuzione contenuta in hist
+            hist_normalized = hist / len(byte_array) # normalizzazione di hist: la somma degli elementi diventa 1
+            hist_nonzero = hist_normalized[hist_normalized > 0] # eliminazione degli zeri per evitare errori nel calcolo
+            entropy = -np.sum(hist_nonzero * np.log2(hist_nonzero)) # calcolo dell'entropia sulla distribuzione contenuta in hist
             entropies.append(entropy) # accumulatore dell'entropia
             
             # ASCII printable ratio
@@ -152,7 +152,7 @@ def exploratory_analysis(chunks, labels, sample_size=500):
             ascii_ratios.append(ascii_count / len(byte_array)) # rapporto tra char stampabili e lunghezza totale
             
             # Distribuzione byte aggregata
-            byte_distributions += hist * 256  #riporta la distribuzione in scala assoluta
+            byte_distributions += hist 
         
         byte_distributions /= len(chunk_indices) # Frequenza media normalizzata
         
