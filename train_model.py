@@ -23,7 +23,7 @@ CONFIG = {
     'max_length': 1024,
     'batch_size': 16,
     'learning_rate': 3e-5,
-    'num_epochs': 3,
+    'num_epochs': 10,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
