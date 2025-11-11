@@ -23,11 +23,11 @@ CONFIG = {
     'max_length': 1024,
     'batch_size': 32,
     'learning_rate': 3e-5,
-    'num_epochs': 20,
+    'num_epochs': 3,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
-    'debug_mode': True,      # True = usa subset, False = dataset completo
+    'debug_mode': False,      # True = usa subset, False = dataset completo
     'debug_train_size': 1000,
     'debug_test_size': 200
 }
