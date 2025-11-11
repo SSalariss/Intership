@@ -35,7 +35,7 @@ np.random.seed(CONFIG['seed'])
 print(f"Device: {CONFIG['device']}")
 if CONFIG['device'] == 'cuda':
     print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"VRAM disponibile: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f } GB")
+    print(f"VRAM disponibile: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
 
 # Dataset
