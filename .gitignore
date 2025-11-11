@@ -10,3 +10,5 @@ data/pdf
 artifacts
 # Virtual environments
 .venv
+models/*
+models/
