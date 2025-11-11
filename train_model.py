@@ -22,11 +22,14 @@ CONFIG = {
     'model_name': 'google/byt5-small',
     'max_length': 1024,
     'batch_size': 16,
-    'learning_rate': 5e-5,
-    'num_epochs': 5,
+    'learning_rate': 1e-5,
+    'num_epochs': 20,
     'device': 'cuda' if torch.cuda.is_available() else 'cpu',
     'seed': 42,
-    'save_dir': './models'
+    'save_dir': './models',
+    'debug_mode': True,      # True = usa subset, False = dataset completo
+    'debug_train_size': 1000,
+    'debug_test_size': 200
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -105,10 +108,10 @@ class ByT5Classifier(torch.nn.Module):
         self.classifier = torch.nn.Sequential(
             torch.nn.Linear(hidden_size, 256),  # comprime le feature in trasformazione lineare
             torch.nn.ReLU(),                    # introduce la non-linearità ReLU(x) = max(0,x)
-            torch.nn.Dropout(0.3),              # disattiva dei neuroni per prevenire overfitting
+            torch.nn.Dropout(0.5),              # disattiva dei neuroni per prevenire overfitting
             torch.nn.Linear(256, 128),
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.2),              # 20% dei neuroni disattivati
+            torch.nn.Dropout(0.4),              # 40% dei neuroni disattivati
             torch.nn.Linear(128, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
         )
 
@@ -253,7 +256,7 @@ def train_model(model, train_loader, test_loader, config):
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config['learning_rate'],
-        weight_decay=0.01
+        weight_decay=0.05
     )
 
     criterion = torch.nn.CrossEntropyLoss() # Crea la funzione di loss
@@ -310,6 +313,12 @@ def main():
     except FileNotFoundError as e:
         print(f"\n Errore nel caricamento del dataset: {e}")
         return
+    
+    if CONFIG['debug_mode']:
+        from torch.utils.data import Subset
+        train_dataset = Subset(train_dataset, range(CONFIG['debug_train_size']))
+        test_dataset = Subset(test_dataset, range(CONFIG['debug_test_size']))
+        print(f"\n DEBUG MODE: {CONFIG['debug_train_size']} train, {CONFIG['debug_test_size']} test")
     
     # Crea DataLoader
     train_loader = DataLoader(
