@@ -21,7 +21,7 @@ CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
     'max_length': 1024,
-    'batch_size': 32,
+    'batch_size': 16,
     'learning_rate': 3e-5,
     'num_epochs': 3,
     'device': DEVICE,
