@@ -132,7 +132,7 @@ class ByT5Classifier(torch.nn.Module):
         return logits # ritorniamo il logit da passare
     
 
-def prepare_batch(chunks, labels, tokenizer, max_lenght, device):
+def prepare_batch(chunks, labels, tokenizer, max_length, device):
     # Prepariamo il batch pcon il tokenizer byt5
 
     batch_labels = []
@@ -141,16 +141,18 @@ def prepare_batch(chunks, labels, tokenizer, max_lenght, device):
     for chunk, label in zip(chunks, labels):
         # il tokenizer gestisce i byte
         # dobbiamo converirli in stringhe utf8
+        text = chunk.decode('utf-8', errors='ignore')
+        
         texts.append(chunk)
         batch_labels.append(label)
 
     #Tokenizza
     encoded = tokenizer(
         texts,                  # stringhe da tokenizzare
-        padding='max_lenght',   # aggiungiamo padding
+        padding='max_length',   # aggiungiamo padding
         truncation=True,        # tronchiamo le sequenze maggiori di 1024 byte
-        max_lenght=max_lenght,
-        return_tensor='pt'      # ritorna un tensore
+        max_length=max_length,
+        return_tensors='pt'      # ritorna un tensore
     )
 
     input_ids = encoded['input_ids'].to(device)
