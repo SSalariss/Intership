@@ -143,7 +143,7 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
         # dobbiamo converirli in stringhe utf8
         text = chunk.decode('utf-8', errors='ignore')
         
-        texts.append(chunk)
+        texts.append(text)
         batch_labels.append(label)
 
     #Tokenizza
