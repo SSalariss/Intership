@@ -12,3 +12,4 @@ artifacts
 .venv
 models/*
 models/
+*.pt
