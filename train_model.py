@@ -258,7 +258,7 @@ def train_model(model, train_loader, test_loader, config):
 
     # learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=1, verbose=True
+        optimizer, mode='max', factor=0.5, patience=1
     ) 
 
     best_test_acc = 0
