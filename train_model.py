@@ -21,15 +21,15 @@ CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
     'max_length': 2048,
-    'batch_size': 7,
-    'learning_rate': 3e-5,
+    'batch_size': 4,
+    'learning_rate': 5e-5,
     'num_epochs': 10,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
     'debug_mode': True,      # True = usa subset, False = dataset completo
-    'debug_train_size': 1000,
-    'debug_test_size': 200
+    'debug_train_size': 3000,
+    'debug_test_size': 600
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -324,7 +324,7 @@ def main():
     train_loader = DataLoader(
         train_dataset,
         batch_size=CONFIG['batch_size'],
-        shuffle=True,
+        shuffle=True, 
         num_workers = 0 
     )
 
@@ -349,7 +349,7 @@ def main():
     print(f"Parametri trainable: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
 
     # Fase di Training 
-    history, best_acc = train_model(model, train_loader, test_loader, CONFIG)
+    train_model(model, train_loader, test_loader, CONFIG)
 
      # Carica best model
     print("\nCaricamento del miglior modello per valutazione finale...")
