@@ -22,14 +22,14 @@ CONFIG = {
     'model_name': 'google/byt5-small',
     'max_length': 1024,
     'batch_size': 16,
-    'learning_rate': 3e-5,
+    'learning_rate': 1e-5,
     'num_epochs': 10,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
-    'debug_mode': False,      # True = usa subset, False = dataset completo
-    'debug_train_size': 1000,
-    'debug_test_size': 200
+    'debug_mode': True,      # True = usa subset, False = dataset completo
+    'debug_train_size': 3000,
+    'debug_test_size': 600
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -108,10 +108,10 @@ class ByT5Classifier(torch.nn.Module):
         self.classifier = torch.nn.Sequential(
             torch.nn.Linear(hidden_size, 256),  # comprime le feature in trasformazione lineare
             torch.nn.ReLU(),                    # introduce la non-linearità ReLU(x) = max(0,x)
-            torch.nn.Dropout(0.5),              # disattiva dei neuroni per prevenire overfitting
+            torch.nn.Dropout(0.3),              # disattiva dei neuroni per prevenire overfitting
             torch.nn.Linear(256, 128),
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.4),              # 40% dei neuroni disattivati
+            torch.nn.Dropout(0.2),              # 40% dei neuroni disattivati
             torch.nn.Linear(128, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
         )
 
