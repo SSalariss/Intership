@@ -21,7 +21,7 @@ CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
     'max_length': 2048,
-    'batch_size': 4,
+    'batch_size': 1,
     'learning_rate': 3e-5,
     'num_epochs': 10,
     'device': DEVICE,
@@ -309,7 +309,7 @@ def main():
 
     # carichiamo il dataset
     try:
-        train_dataset, test_dataset, info = load_dataset(CONFIG['dataset_dir'])
+        train_dataset, test_dataset = load_dataset(CONFIG['dataset_dir'])
     except FileNotFoundError as e:
         print(f"\n Errore nel caricamento del dataset: {e}")
         return
