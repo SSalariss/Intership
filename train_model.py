@@ -23,13 +23,13 @@ CONFIG = {
     'max_length': 2048,
     'batch_size': 4,
     'learning_rate': 5e-5,
-    'num_epochs': 10,
+    'num_epochs': 4,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
-    'debug_mode': True,      # True = usa subset, False = dataset completo
-    'debug_train_size': 3000,
-    'debug_test_size': 600
+    'debug_mode': False,      # True = usa subset, False = dataset completo
+    'debug_train_size': 1000,
+    'debug_test_size': 200
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -106,17 +106,20 @@ class ByT5Classifier(torch.nn.Module):
         trasformano lo spazio originale di 1472 dimensioni in uno spazio di decisione per le classificazioni.
         '''
         self.classifier = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 256),  # comprime le feature in trasformazione lineare
+            torch.nn.Linear(hidden_size, 512),   # piu neuroni
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.3),
+            torch.nn.Linear(512, 256),          # comprime le feature in trasformazione lineare
             torch.nn.ReLU(),                    # introduce la non-linearità ReLU(x) = max(0,x)
-            torch.nn.Dropout(0.3),              # disattiva dei neuroni per prevenire overfitting
+            torch.nn.Dropout(0.2),              # disattiva dei neuroni per prevenire overfitting
             torch.nn.Linear(256, 128),
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.2),              # 40% dei neuroni disattivati
+            torch.nn.Dropout(0.1),              # 20% dei neuroni disattivati
             torch.nn.Linear(128, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
         )
 
     def forward(self,input_ids,attention_mask):
-        #L'encoder di ByT5 processa i 1024 byte attraverso 12 layer di transformer
+        #L'encoder di ByT5 processa i 2048 byte attraverso 12 layer di transformer
         outputs = self.encoder(
             input_ids=input_ids,
             attention_mask=attention_mask
@@ -261,10 +264,12 @@ def train_model(model, train_loader, test_loader, config):
 
     criterion = torch.nn.CrossEntropyLoss() # Crea la funzione di loss
 
+    
     # learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=1
+        optimizer, mode='max', factor=0.5, patience=3
     ) 
+    
 
     best_test_acc = 0
 
@@ -278,7 +283,7 @@ def train_model(model, train_loader, test_loader, config):
 
         # Evaluation
         test_loss, test_acc = evaluate(model, test_loader, criterion, config)
-
+        
         # Update scheduler
         scheduler.step(test_acc)
 
@@ -338,6 +343,8 @@ def main():
     print(f"\nBatch size: {CONFIG['batch_size']}")
     print(f"Train batches: {len(train_loader)}")
     print(f"Test batches: {len(test_loader)}")
+
+    print(f"\n Learning Rate: {CONFIG['learning_rate']}")
 
     # Inizializzazione del modello
     model = ByT5Classifier(CONFIG['model_name'], num_labels=2).to(CONFIG['device'])
