@@ -20,16 +20,16 @@ except ImportError:
 CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
-    'max_length': 1024,
+    'max_length': 2048,
     'batch_size': 16,
-    'learning_rate': 1e-5,
+    'learning_rate': 3e-5,
     'num_epochs': 10,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
     'debug_mode': True,      # True = usa subset, False = dataset completo
-    'debug_train_size': 3000,
-    'debug_test_size': 600
+    'debug_train_size': 1000,
+    'debug_test_size': 200
 }
 
 torch.manual_seed(CONFIG['seed'])
