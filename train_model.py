@@ -309,7 +309,7 @@ def main():
 
     # carichiamo il dataset
     try:
-        train_dataset, test_dataset = load_dataset(CONFIG['dataset_dir'])
+        train_dataset, test_dataset, info = load_dataset(CONFIG['dataset_dir'])
     except FileNotFoundError as e:
         print(f"\n Errore nel caricamento del dataset: {e}")
         return
