@@ -345,8 +345,8 @@ def main():
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
 
-    print(f"\nParametri totali: {total_params:,}")
-    print(f"Parametri trainable: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
+    #print(f"\nParametri totali: {total_params:,}")
+    #print(f"Parametri trainable: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
 
     # Fase di Training 
     train_model(model, train_loader, test_loader, CONFIG)
