@@ -20,14 +20,14 @@ except ImportError:
 CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
-    'max_length': 2048,
-    'batch_size': 4,
+    'max_length': 3072,
+    'batch_size': 2,
     'learning_rate': 5e-5,
-    'num_epochs': 4,
+    'num_epochs': 10,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
-    'debug_mode': False,      # True = usa subset, False = dataset completo
+    'debug_mode': True,      # True = usa subset, False = dataset completo
     'debug_train_size': 1000,
     'debug_test_size': 200
 }
@@ -148,7 +148,8 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
         # il tokenizer gestisce i byte
         # dobbiamo converirli in stringhe utf8
         text = chunk.decode('utf-8', errors='ignore')
-        
+        # sostiuiamo con latin 1 che preserva i byte mappandoli senza resituire <UNK>
+        #text = chunk.decode('latin-1')
         texts.append(text)
         batch_labels.append(label)
 
@@ -264,12 +265,12 @@ def train_model(model, train_loader, test_loader, config):
 
     criterion = torch.nn.CrossEntropyLoss() # Crea la funzione di loss
 
-    
+    '''
     # learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, mode='max', factor=0.5, patience=3
     ) 
-    
+    '''
 
     best_test_acc = 0
 
@@ -283,10 +284,10 @@ def train_model(model, train_loader, test_loader, config):
 
         # Evaluation
         test_loss, test_acc = evaluate(model, test_loader, criterion, config)
-        
+        '''
         # Update scheduler
         scheduler.step(test_acc)
-
+        '''
         # Print risultati
         print(f"\n{'─'*60}")
         print(f"Risultati Epoch {epoch + 1}:")
@@ -330,7 +331,10 @@ def main():
         train_dataset,
         batch_size=CONFIG['batch_size'],
         shuffle=True, 
-        num_workers = 0 
+        num_workers=4,              # Parallelizza il caricamento
+        pin_memory=True,            # Velocizza trasferimenti CPU->GPU
+        prefetch_factor=2,          # Precarica 2 batch per worker
+        persistent_workers=True     # Mantiene i worker attivi tra le epoch 
     )
 
     test_loader = DataLoader(
