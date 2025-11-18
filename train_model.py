@@ -1,4 +1,3 @@
-
 import torch
 import numpy as np
 from torch.utils.data import Dataset, DataLoader
@@ -6,6 +5,9 @@ import os
 import pickle
 from transformers import AutoTokenizer, T5EncoderModel
 from tqdm import tqdm
+import h5py
+
+
 
 # Importa gpu_selector
 try:
@@ -20,16 +22,16 @@ except ImportError:
 CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
-    'max_length': 3072,
-    'batch_size': 2,
-    'learning_rate': 5e-5,
-    'num_epochs': 10,
+    'max_length': 2024,
+    'batch_size': 4,
+    'learning_rate': 3e-4,
+    'num_epochs': 15,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
-    'debug_mode': True,      # True = usa subset, False = dataset completo
-    'debug_train_size': 1000,
-    'debug_test_size': 200
+    'debug_mode': True,         # True = usa subset, False = dataset completo
+    'debug_train_size': 12000,
+    'debug_test_size': 2400
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -43,23 +45,40 @@ if CONFIG['device'] == 'cuda':
 
 # Dataset
 
-class ChunkDataset(Dataset):
+class LazyChunkDataset(Dataset):
 
-    def __init__(self, chunks, labels):
-        self.chunks = chunks
-        self.labels = labels
+    def __init__(self, h5_path):
+        self.h5_path = h5_path
+
+        # Leggiamo solo metadata 
+        with h5py.File(h5_path, 'r') as f:
+            self.length = len(f['labels'])
+            self.max_chunk_size = f.attrs['max_chunk_size']
+        
+        self.file = None  # Sarà aperto lazy
 
     def __len__(self):
-        return len(self.chunks)
+        return self.length
 
     def __getitem__(self, idx):
-        return self.chunks[idx], self.labels[idx]
+        # Apri il file solo al primo accesso
+        if self.file is None:
+            self.file = h5py.File(self.h5_path, 'r')
+        
+        # Carichiamo solo il chunk richiesto
+        chunks_array = self.file['chunks'][idx]
+        label = int(self.file['labels'][idx])
+
+        # Rimuovi padding (byte zero all fine)
+        chunk = bytes(chunks_array[chunks_array != 0])
+
+        return chunk, label
+
     
 def load_dataset(dataset_dir):
     # carica del dataset 
-
-    train_path = os.path.join(dataset_dir, 'train_data.pkl')
-    test_path = os.path.join(dataset_dir, 'test_data.pkl')
+    train_path = os.path.join(dataset_dir, 'train_data.h5')
+    test_path = os.path.join(dataset_dir, 'test_data.h5')
     info_path = os.path.join(dataset_dir, 'dataset_info.pkl')
 
     if not os.path.exists(train_path):
@@ -67,22 +86,16 @@ def load_dataset(dataset_dir):
     
     print("\nCaricamento dataset...")
 
-    with open(train_path, 'rb') as f:
-        train_data = pickle.load(f)
-    
-    with open(test_path, 'rb') as f:
-        test_data = pickle.load(f)
+    train_dataset = LazyChunkDataset(train_path)
+    test_dataset = LazyChunkDataset(test_path)
 
     with open(info_path, 'rb') as f:
         info = pickle.load(f)
 
-    print(f" Train: {len(train_data['chunks'])} chunk")
-    print(f" Test: {len(test_data['chunks'])} chunk")
+    print(f" Train: {len(train_dataset)} chunk")
+    print(f" Test: {len(test_dataset)} chunk")
     print(f" Chunk size: {info['chunk_size']} byte")
     print(f" Classi: {info['class_names']}")
-
-    train_dataset = ChunkDataset(train_data['chunks'], train_data['labels'])
-    test_dataset = ChunkDataset(test_data['chunks'], test_data['labels'])
 
     return train_dataset, test_dataset, info
 
@@ -92,10 +105,16 @@ class ByT5Classifier(torch.nn.Module):
     def __init__(self, model_name, num_labels=2):
         super().__init__()
         print(f"\nCaricamento modello {model_name}...")
-
+        
         # carica tokenizer e encoder
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.encoder = T5EncoderModel.from_pretrained(model_name)
+        # Scongela ultimi 3 layer encoder
+        for i in range(9):  # Congela solo 0-8
+            for param in self.encoder.encoder.block[i].parameters():
+                param.requires_grad = False
+
+        #self.encoder.gradient_checkpointing_enable()
 
         #d_model:  dimensione encoder output nel nostro caso small 1472
         hidden_size = self.encoder.config.d_model # dimensione del vettore di rappresentazione
@@ -106,16 +125,16 @@ class ByT5Classifier(torch.nn.Module):
         trasformano lo spazio originale di 1472 dimensioni in uno spazio di decisione per le classificazioni.
         '''
         self.classifier = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 512),   # piu neuroni
+            torch.nn.Linear(hidden_size, 1024),  # piu neuroni
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(512, 256),          # comprime le feature in trasformazione lineare
+            torch.nn.Dropout(0.25),
+            torch.nn.Linear(1024, 512),          # comprime le feature in trasformazione lineare
             torch.nn.ReLU(),                    # introduce la non-linearità ReLU(x) = max(0,x)
-            torch.nn.Dropout(0.2),              # disattiva dei neuroni per prevenire overfitting
-            torch.nn.Linear(256, 128),
+            torch.nn.Dropout(0.25),              # disattiva dei neuroni per prevenire overfitting
+            torch.nn.Linear(512, 256),
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.1),              # 20% dei neuroni disattivati
-            torch.nn.Linear(128, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
+            torch.nn.Dropout(0.15),              # 20% dei neuroni disattivati
+            torch.nn.Linear(256, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
         )
 
     def forward(self,input_ids,attention_mask):
@@ -155,11 +174,11 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
 
     #Tokenizza
     encoded = tokenizer(
-        texts,                  # stringhe da tokenizzare
-        padding='max_length',   # aggiungiamo padding
-        truncation=True,        # tronchiamo le sequenze maggiori di 1024 byte
+        texts,                      # stringhe da tokenizzare
+        padding='max_length',       # aggiungiamo padding
+        truncation=True,            # tronchiamo le sequenze maggiori di Max Length byte
         max_length=max_length,
-        return_tensors='pt'      # ritorna un tensore
+        return_tensors='pt'         # ritorna un tensore
     )
 
     input_ids = encoded['input_ids'].to(device)
@@ -172,11 +191,11 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
 def train_epoch(model, dataloader, optimizer, criterion, config):
     # un epoch
     model.train()       # modalità training
-    
+
     total_loss = 0      # accumula il loss
     correct = 0         # conta il numero di predizioni corrette
     total = 0           # numero di campioni per l'accuracy
-    
+
     pbar = tqdm(dataloader, desc="Training")
     for chunks, labels in pbar:
         '''
@@ -193,15 +212,12 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
         optimizer.zero_grad()                       # azzera i gradienti (pytorch li accumula di default)
         logits = model(input_ids, attention_mask)   # byte -> hidden states, mean pooling, classification head
         loss = criterion(logits, labels)            # confronta i logits con le etichette vere (errore)
-        loss.backward()                             # calcola i gradienti della loss
-        
+        loss.backward()                             # Accumula i gradienti
         '''
         I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
         Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
-        '''
-        # Gradient Clipping
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-       
+        '''  
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)   
         optimizer.step()                                # Aggiorna i pesi
         
         total_loss += loss.item()                       # accumula la loss del batch corrente
@@ -215,15 +231,12 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
             'loss': f'{loss.item():.4f}',               # loss dell'ultimo batch
             'acc': f'{current_acc:.4f}'                 # accuracy cumulativa
         })
-    
-    avg_loss = total_loss / len(dataloader)
-    accuracy = correct / total
-    
+    avg_loss = total_loss / len(dataloader) 
+    accuracy = correct / total  
     return avg_loss, accuracy
 
 def evaluate(model, dataloader, criterion, config):
     # Valutazione del modello
-
     model.eval()
 
     total_loss=0
@@ -236,11 +249,9 @@ def evaluate(model, dataloader, criterion, config):
             input_ids, attention_mask, labels = prepare_batch(
                 chunks, labels, model.tokenizer, config['max_length'], config['device']
             ) # tensori pronti per il modello
-
             # Forward pass
             logits = model(input_ids, attention_mask)
             loss = criterion(logits, labels)
-
             total_loss += loss.item()
 
             predictions = torch.argmax(logits, dim=1)
@@ -250,28 +261,28 @@ def evaluate(model, dataloader, criterion, config):
     #calcolo delle metriche finali
     avg_loss = total_loss / len(dataloader)
     accuracy = correct / total
-
-    
     return avg_loss, accuracy
 
 def train_model(model, train_loader, test_loader, config):
-    # loop completo
-
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config['learning_rate'],
-        weight_decay=0.05
+    # loop 
+    optimizer = torch.optim.AdamW([
+        {'params': model.encoder.encoder.block[-3:].parameters(), 'lr': 5e-5},
+        {'params': model.classifier.parameters(), 'lr': 3e-4}], 
+        weight_decay=0.025
     )
 
     criterion = torch.nn.CrossEntropyLoss() # Crea la funzione di loss
-
-    '''
+    
     # learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=3
-    ) 
-    '''
+        optimizer, 
+        mode='max',           # Massimizza test acc
+        factor=0.5,           # Dimezza LR
+        patience=2,           # Dopo 2 epoch senza miglioramento
+        min_lr=1e-6
+    )
 
+    
     best_test_acc = 0
 
     print("\nINIZIO TRAINING\n")
@@ -281,13 +292,10 @@ def train_model(model, train_loader, test_loader, config):
 
         # Training
         train_loss,train_acc = train_epoch(model, train_loader, optimizer, criterion, config)
-
         # Evaluation
         test_loss, test_acc = evaluate(model, test_loader, criterion, config)
-        '''
         # Update scheduler
         scheduler.step(test_acc)
-        '''
         # Print risultati
         print(f"\n{'─'*60}")
         print(f"Risultati Epoch {epoch + 1}:")
@@ -311,37 +319,46 @@ def train_model(model, train_loader, test_loader, config):
 
     return best_test_acc
 
-def main():
+def get_vram_usage(device):
+    free, total = torch.cuda.mem_get_info(device)
+    vram_usage = (total - free) / (1024 ** 2) # MB
+    return vram_usage
 
+def main():
     # carichiamo il dataset
     try:
         train_dataset, test_dataset, info = load_dataset(CONFIG['dataset_dir'])
     except FileNotFoundError as e:
         print(f"\n Errore nel caricamento del dataset: {e}")
         return
-    
+
     if CONFIG['debug_mode']:
         from torch.utils.data import Subset
         train_dataset = Subset(train_dataset, range(CONFIG['debug_train_size']))
         test_dataset = Subset(test_dataset, range(CONFIG['debug_test_size']))
         print(f"\n DEBUG MODE: {CONFIG['debug_train_size']} train, {CONFIG['debug_test_size']} test")
-    
+
     # Crea DataLoader
     train_loader = DataLoader(
         train_dataset,
         batch_size=CONFIG['batch_size'],
         shuffle=True, 
-        num_workers=4,              # Parallelizza il caricamento
-        pin_memory=True,            # Velocizza trasferimenti CPU->GPU
-        prefetch_factor=2,          # Precarica 2 batch per worker
-        persistent_workers=True     # Mantiene i worker attivi tra le epoch 
+        num_workers=8,
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True,
+        multiprocessing_context='fork'
     )
 
     test_loader = DataLoader(
         test_dataset,
         batch_size=CONFIG['batch_size'],
         shuffle=False,
-        num_workers=0
+        num_workers=8,
+        pin_memory=True,
+        prefetch_factor=4,
+        persistent_workers=True,
+        multiprocessing_context='fork'
     )
 
     print(f"\nBatch size: {CONFIG['batch_size']}")
@@ -350,19 +367,21 @@ def main():
 
     print(f"\n Learning Rate: {CONFIG['learning_rate']}")
 
+
+    print(f"\n Vram iniziale: {get_vram_usage(CONFIG['device'])}")
+
     # Inizializzazione del modello
     model = ByT5Classifier(CONFIG['model_name'], num_labels=2).to(CONFIG['device'])
 
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total_params = sum(p.numel() for p in model.parameters())
-
-    #print(f"\nParametri totali: {total_params:,}")
-    #print(f"Parametri trainable: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
+    # Debugging memoria
+    print(f"\n Vram dopo Model Load: {get_vram_usage(CONFIG['device'])}")
 
     # Fase di Training 
     train_model(model, train_loader, test_loader, CONFIG)
 
-     # Carica best model
+    print(f"\n Vram dopo training: {get_vram_usage(CONFIG['device'])}")
+
+    # Carica best model
     print("\nCaricamento del miglior modello per valutazione finale...")
     checkpoint = torch.load(os.path.join(CONFIG['save_dir'], 'best_model.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
