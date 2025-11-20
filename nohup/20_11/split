@@ -1,0 +1,14 @@
+Device: cuda
+Caricamento file paths...
+File ENC: 1153
+File PDF: 958
+
+Split train/val/test...
+Traceback (most recent call last):
+  File "/home/ssalaris/Intership/split_and_train_byt5.py", line 395, in <module>
+    main()
+    ~~~~^^
+  File "/home/ssalaris/Intership/split_and_train_byt5.py", line 347, in main
+    train_files, test_files, train_labels, test_labels = train_test_split(
+                                                         ^^^^^^^^^^^^^^^^
+NameError: name 'train_test_split' is not defined

@@ -22,17 +22,16 @@ except ImportError:
 CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
-    'max_length': 2024,
-    'batch_size': 4,
-    'accumulation_steps': 2,
-    'learning_rate': 3e-4,
+    'max_length': 2048,
+    'batch_size': 2,
+    'learning_rate': 3e-5,
     'num_epochs': 15,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
     'debug_mode': True,         # True = usa subset, False = dataset completo
-    'debug_train_size': 12000,
-    'debug_test_size': 2400
+    'debug_train_size': 4000,
+    'debug_test_size': 800
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -43,9 +42,83 @@ if CONFIG['device'] == 'cuda':
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"VRAM disponibile: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
+class EarlyStopping:
+    """
+    Early stopping per fermare il training quando test accuracy smette di migliorare
+    """
+    def __init__(self, patience=5, min_delta=0.0001, verbose=True):
+        """
+        Args:
+            patience: Numero di epoch da aspettare senza miglioramento
+            min_delta: Miglioramento minimo considerato significativo (0.005 = 0.5%)
+            verbose: Stampa messaggi
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.verbose = verbose
+        self.counter = 0
+        self.best_acc = None
+        self.should_stop = False
+        self.best_epoch = 0
+
+    def __call__(self, current_acc, current_epoch):
+        """
+        Controlla se fermare il training
+        
+        Returns:
+            True se bisogna fermare, False altrimenti
+        """
+        if self.best_acc is None:
+            # Prima epoch
+            self.best_acc = current_acc
+            self.best_epoch = current_epoch
+            if self.verbose:
+                print(f" EarlyStopping inizializzato (best: {self.best_acc:.4f})")
+        
+        elif current_acc < self.best_acc + self.min_delta:
+            # Accuracy non è migliorata abbastanza
+            self.counter += 1
+            if self.verbose:
+                print(f" EarlyStopping counter: {self.counter}/{self.patience} (best: {self.best_acc:.4f} @ epoch {self.best_epoch})")
+            
+            if self.counter >= self.patience:
+                self.should_stop = True
+                if self.verbose:
+                    print(f"\n{'='*60}")
+                    print(f" EARLY STOPPING ATTIVATO")
+                    print(f" Nessun miglioramento per {self.patience} epoch consecutive")
+                    print(f" Best accuracy: {self.best_acc:.4f} (epoch {self.best_epoch})")
+                    print(f"{'='*60}\n")
+                return True
+        
+        else:
+            # Accuracy migliorata
+            improvement = current_acc - self.best_acc
+            self.best_acc = current_acc
+            self.best_epoch = current_epoch
+            self.counter = 0
+            if self.verbose:
+                print(f" Accuracy migliorata di {improvement:.4f} ({improvement*100:.2f}%)")
+        
+        return False
+    
+    def reset(self):
+        """Reset dello stato (utile per nuovi training)"""
+        self.counter = 0
+        self.best_acc = None
+        self.should_stop = False
+        self.best_epoch = 0
+
+class Residual(torch.nn.Module):
+    def __init__(self, layer):
+        super().__init__()
+        self.layer = layer
+
+    def forward(self, x):
+        return x + self.layer(x)
+
 
 # Dataset
-
 class LazyChunkDataset(Dataset):
 
     def __init__(self, h5_path):
@@ -110,12 +183,10 @@ class ByT5Classifier(torch.nn.Module):
         # carica tokenizer e encoder
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.encoder = T5EncoderModel.from_pretrained(model_name)
-        # Scongela ultimi 3 layer encoder
-        for i in range(9):  # Congela solo 0-8
-            for param in self.encoder.encoder.block[i].parameters():
-                param.requires_grad = False
-
-        #self.encoder.gradient_checkpointing_enable()
+        '''
+        for param in self.encoder.encoder.parameters():
+            param.requires_grad = False
+        '''
 
         #d_model:  dimensione encoder output nel nostro caso small 1472
         hidden_size = self.encoder.config.d_model # dimensione del vettore di rappresentazione
@@ -126,36 +197,43 @@ class ByT5Classifier(torch.nn.Module):
         trasformano lo spazio originale di 1472 dimensioni in uno spazio di decisione per le classificazioni.
         '''
         self.classifier = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 1024),  # piu neuroni
+            Residual(torch.nn.Sequential( 
+                torch.nn.Linear(hidden_size, hidden_size),  # piu neuroni
+                torch.nn.ReLU()
+            )),
+            #torch.nn.Dropout(0.4),
+            torch.nn.Linear(hidden_size, 1024),
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.25),
-            torch.nn.Linear(1024, 512),          # comprime le feature in trasformazione lineare
-            torch.nn.ReLU(),                    # introduce la non-linearità ReLU(x) = max(0,x)
-            torch.nn.Dropout(0.25),              # disattiva dei neuroni per prevenire overfitting
+            Residual(torch.nn.Sequential( 
+                torch.nn.Linear(1024, 1024),  # piu neuroni
+                torch.nn.ReLU()
+            )),                           
+            #torch.nn.Dropout(0.3),              
+            torch.nn.Linear(1024, 512),
+            torch.nn.ReLU(),
+            Residual(torch.nn.Sequential( 
+                torch.nn.Linear(512, 512),  # piu neuroni
+                torch.nn.ReLU()
+            )),    
             torch.nn.Linear(512, 256),
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.15),              # 20% dei neuroni disattivati
+            #torch.nn.Dropout(0.3),              # 20% dei neuroni disattivati
             torch.nn.Linear(256, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
         )
 
-    def forward(self,input_ids,attention_mask):
-        #L'encoder di ByT5 processa i 2048 byte attraverso 12 layer di transformer
-        outputs = self.encoder(
-            input_ids=input_ids,
-            attention_mask=attention_mask
-        )
-
-        # convertire una sequenza variabile di token in una singola rappresentazione fissa pronta per la classificazione.
-        # mean pooling
-        hidden_states = outputs.last_hidden_state                                           # last_hidden_state è un tensore di dimensione [batch_size, sequence_length, hidden_size].
-        mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.size()).float()   # espande l'attention mask per far corrispondere la forma degli hidden states, permettendo di applicare il mask a ogni dimensione
-        sum_hidden = torch.sum(hidden_states * mask_expanded, 1)                            # somma i contributi di tutti i token reali (escludendo il padding) per ogni hidden state [1 è la dimensione]
-        sum_mask = torch.clamp(mask_expanded.sum(1), min=1e-9)                              # somma il mask e applica un limite minimo per evitare divisioni per zero
-        pooled = sum_hidden / sum_mask                                                      # Questa riga calcola la media degli hidden states, dividendo la somma per il numero di token reali
-
-        # Classifica
-        logits = self.classifier(pooled)
-        return logits # ritorniamo il logit da passare
+    def forward(self, input_ids, attention_mask):
+        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        hidden_states = outputs.last_hidden_state  # [batch, seq, 1472]
+        
+        mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.size()).float()
+        
+        # Mean pooling
+        sum_hidden = torch.sum(hidden_states * mask_expanded, 1)
+        sum_mask = torch.clamp(mask_expanded.sum(1), min=1e-9)
+        mean_pool = sum_hidden / sum_mask  # [batch, 1472]
+        
+        logits = self.classifier(mean_pool)
+        return logits
     
 
 def prepare_batch(chunks, labels, tokenizer, max_length, device):
@@ -192,16 +270,13 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
 def train_epoch(model, dataloader, optimizer, criterion, config):
     # un epoch
     model.train()       # modalità training
-    accumulation_steps = config.get('accumulation_steps', 1)
 
     total_loss = 0      # accumula il loss
     correct = 0         # conta il numero di predizioni corrette
     total = 0           # numero di campioni per l'accuracy
 
-    optimizer.zero_grad()  # Azzera all'inizio
-
     pbar = tqdm(dataloader, desc="Training")
-    for batch_idx, (chunks, labels) in enumerate(pbar):
+    for chunks, labels in pbar:
         '''
         La barra mostra:
             - Percentuale completata
@@ -213,47 +288,29 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
             chunks, labels, model.tokenizer, config['max_length'], config['device']
         ) # ritorna input_ids, attention_mask e labels
         
-        #optimizer.zero_grad()                       # azzera i gradienti (pytorch li accumula di default)
-        
-        # Forward pass
+        optimizer.zero_grad()                       # azzera i gradienti (pytorch li accumula di default)
+
         logits = model(input_ids, attention_mask)   # byte -> hidden states, mean pooling, classification head
         loss = criterion(logits, labels)            # confronta i logits con le etichette vere (errore)
+        loss.backward()                             # Accumula i gradienti
+        '''
+        I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
+        Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
+        '''  
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)   
+        optimizer.step()                                # Aggiorna i pesi
         
-        # Normalizza loss per accumulation, da levare se togli gli accumulation
-        loss = loss / accumulation_steps
-
-        # Accumula i gradienti
-        loss.backward()                             
-        if (batch_idx + 1) % accumulation_steps == 0:
-            '''
-            I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
-            Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
-            '''  
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)   
-            
-            # Update pesi
-            optimizer.step()                              
-            optimizer.zero_grad()
-        
-        # Metriche (usa loss originale non normalizzato)
-        total_loss += loss.item() * accumulation_steps      # accumula la loss del batch corrente
-        predictions = torch.argmax(logits, dim=1)           # ottiene la classe predetta per ogni campione del batch
-        correct += (predictions == labels).sum().item()     # Conta quanti campioni sono stati predetti correttamente: prodotti vs etichette
-        total += labels.size(0)                             # Conta il numero totale di campioni
+        total_loss += loss.item()                       # accumula la loss del batch corrente
+        predictions = torch.argmax(logits, dim=1)       # ottiene la classe predetta per ogni campione del batch
+        correct += (predictions == labels).sum().item() # Conta quanti campioni sono stati predetti correttamente: prodotti vs etichette
+        total += labels.size(0)                         # Conta il numero totale di campioni
         
         # progress bar
-        current_acc = correct / total                       # Accuratezza parziale sui batch fino a questo punto
+        current_acc = correct / total                   # Accuratezza parziale sui batch fino a questo punto
         pbar.set_postfix({
-            'loss': f'{loss.item() * accumulation_steps:.4f}',  # loss dell'ultimo batch
-            'acc': f'{current_acc:.4f}'                         # accuracy cumulativa
+            'loss': f'{loss.item():.4f}',               # loss dell'ultimo batch
+            'acc': f'{current_acc:.4f}'                 # accuracy cumulativa
         })
-
-        # Ultimo step se rimangono gradienti accumulati
-        if (batch_idx + 1) % accumulation_steps != 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            optimizer.zero_grad()
-
     avg_loss = total_loss / len(dataloader) 
     accuracy = correct / total  
     return avg_loss, accuracy
@@ -288,25 +345,30 @@ def evaluate(model, dataloader, criterion, config):
 
 def train_model(model, train_loader, test_loader, config):
     # loop 
-    optimizer = torch.optim.AdamW([
-        {'params': model.encoder.encoder.block[-3:].parameters(), 'lr': 5e-5},
-        {'params': model.classifier.parameters(), 'lr': 3e-4}], 
-        weight_decay=0.02
+    optimizer = torch.optim.AdamW(
+        model.classifier.parameters(), 
+        lr = 3e-5, 
+        weight_decay = 0.05
     )
 
     criterion = torch.nn.CrossEntropyLoss() # Crea la funzione di loss
-    
-    # learning rate scheduler
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, 
-        mode='max',           # Massimizza test acc
-        factor=0.5,           # Dimezza LR
-        patience=2,           # Dopo 2 epoch senza miglioramento
-        min_lr=1e-6
-    )
 
+    '''
+    # Inizializza early stopping
+    early_stopping = EarlyStopping(
+        patience=config.get('early_stopping_patience', 2),
+        min_delta=config.get('early_stopping_min_delta', 0.005),
+        verbose=True
+    )
+    '''
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.1, patience=5, min_lr=0
+        )
     
-    best_test_acc = 0
+    # Variabili per salvare best model
+    best_test_acc = 0.0
+    best_epoch = 0
 
     print("\nINIZIO TRAINING\n")
 
@@ -315,10 +377,11 @@ def train_model(model, train_loader, test_loader, config):
 
         # Training
         train_loss,train_acc = train_epoch(model, train_loader, optimizer, criterion, config)
+        
         # Evaluation
         test_loss, test_acc = evaluate(model, test_loader, criterion, config)
-        # Update scheduler
-        scheduler.step(test_acc)
+        
+        scheduler.step(test_loss)
         # Print risultati
         print(f"\n{'─'*60}")
         print(f"Risultati Epoch {epoch + 1}:")
@@ -328,6 +391,9 @@ def train_model(model, train_loader, test_loader, config):
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
+            best_epoch = epoch + 1
+
+            # Salva checkpoint
             os.makedirs(config['save_dir'], exist_ok=True)
             model_path = os.path.join(config['save_dir'], 'best_model.pt')
             torch.save({
@@ -336,11 +402,26 @@ def train_model(model, train_loader, test_loader, config):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'test_acc:': test_acc,
                 'test_loss': test_loss,
+                'train_acc': train_acc,
+                'train_loss': train_loss,
                 'config': config
             }, model_path)
             print(f" Salvato il miglior modello (test_acc: {test_acc:.4f}({test_acc*100:.2f}%)")
-
-    return best_test_acc
+        
+        # Check early stopping
+        if early_stopping(test_acc, epoch + 1):
+            print(f"\n Training terminato a epoch {epoch + 1}")
+            print(f" Best model salvato: epoch {best_epoch} (test_acc: {best_test_acc:.4f})")
+            break
+    else:
+        # Training completato senza early stopping
+        print(f"\n{'='*60}")
+        print(f" TRAINING COMPLETATO")
+        print(f" Tutte le {config['num_epochs']} epoch eseguite")
+        print(f" Best test accuracy: {best_test_acc:.4f} (epoch {best_epoch})")
+        print(f"{'='*60}\n")
+    
+    return best_test_acc, best_epoch
 
 def get_vram_usage(device):
     free, total = torch.cuda.mem_get_info(device)
