@@ -27,9 +27,9 @@ CONFIG = {
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
-    'debug_mode': False,      # True = usa subset, False = dataset completo
-    'debug_train_size': 1000,
-    'debug_test_size': 200
+    'debug_mode': True,      # True = usa subset, False = dataset completo
+    'debug_train_size': 4000,
+    'debug_test_size': 800
 }
 
 torch.manual_seed(CONFIG['seed'])
