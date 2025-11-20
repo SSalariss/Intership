@@ -13,3 +13,4 @@ artifacts
 models/*
 models/
 *.pt
+*.h5
