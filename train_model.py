@@ -24,6 +24,7 @@ CONFIG = {
     'model_name': 'google/byt5-small',
     'max_length': 2024,
     'batch_size': 4,
+    'accumulation_steps': 2,
     'learning_rate': 3e-4,
     'num_epochs': 15,
     'device': DEVICE,
@@ -191,13 +192,16 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
 def train_epoch(model, dataloader, optimizer, criterion, config):
     # un epoch
     model.train()       # modalità training
+    accumulation_steps = config.get('accumulation_steps', 1)
 
     total_loss = 0      # accumula il loss
     correct = 0         # conta il numero di predizioni corrette
     total = 0           # numero di campioni per l'accuracy
 
+    optimizer.zero_grad()  # Azzera all'inizio
+
     pbar = tqdm(dataloader, desc="Training")
-    for chunks, labels in pbar:
+    for batch_idx, (chunks, labels) in enumerate(pbar):
         '''
         La barra mostra:
             - Percentuale completata
@@ -209,28 +213,47 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
             chunks, labels, model.tokenizer, config['max_length'], config['device']
         ) # ritorna input_ids, attention_mask e labels
         
-        optimizer.zero_grad()                       # azzera i gradienti (pytorch li accumula di default)
+        #optimizer.zero_grad()                       # azzera i gradienti (pytorch li accumula di default)
+        
+        # Forward pass
         logits = model(input_ids, attention_mask)   # byte -> hidden states, mean pooling, classification head
         loss = criterion(logits, labels)            # confronta i logits con le etichette vere (errore)
-        loss.backward()                             # Accumula i gradienti
-        '''
-        I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
-        Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
-        '''  
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)   
-        optimizer.step()                                # Aggiorna i pesi
         
-        total_loss += loss.item()                       # accumula la loss del batch corrente
-        predictions = torch.argmax(logits, dim=1)       # ottiene la classe predetta per ogni campione del batch
-        correct += (predictions == labels).sum().item() # Conta quanti campioni sono stati predetti correttamente: prodotti vs etichette
-        total += labels.size(0)                         # Conta il numero totale di campioni
+        # Normalizza loss per accumulation, da levare se togli gli accumulation
+        loss = loss / accumulation_steps
+
+        # Accumula i gradienti
+        loss.backward()                             
+        if (batch_idx + 1) % accumulation_steps == 0:
+            '''
+            I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
+            Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
+            '''  
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)   
+            
+            # Update pesi
+            optimizer.step()                              
+            optimizer.zero_grad()
+        
+        # Metriche (usa loss originale non normalizzato)
+        total_loss += loss.item() * accumulation_steps      # accumula la loss del batch corrente
+        predictions = torch.argmax(logits, dim=1)           # ottiene la classe predetta per ogni campione del batch
+        correct += (predictions == labels).sum().item()     # Conta quanti campioni sono stati predetti correttamente: prodotti vs etichette
+        total += labels.size(0)                             # Conta il numero totale di campioni
         
         # progress bar
-        current_acc = correct / total                   # Accuratezza parziale sui batch fino a questo punto
+        current_acc = correct / total                       # Accuratezza parziale sui batch fino a questo punto
         pbar.set_postfix({
-            'loss': f'{loss.item():.4f}',               # loss dell'ultimo batch
-            'acc': f'{current_acc:.4f}'                 # accuracy cumulativa
+            'loss': f'{loss.item() * accumulation_steps:.4f}',  # loss dell'ultimo batch
+            'acc': f'{current_acc:.4f}'                         # accuracy cumulativa
         })
+
+        # Ultimo step se rimangono gradienti accumulati
+        if (batch_idx + 1) % accumulation_steps != 0:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            optimizer.zero_grad()
+
     avg_loss = total_loss / len(dataloader) 
     accuracy = correct / total  
     return avg_loss, accuracy
@@ -268,7 +291,7 @@ def train_model(model, train_loader, test_loader, config):
     optimizer = torch.optim.AdamW([
         {'params': model.encoder.encoder.block[-3:].parameters(), 'lr': 5e-5},
         {'params': model.classifier.parameters(), 'lr': 3e-4}], 
-        weight_decay=0.025
+        weight_decay=0.02
     )
 
     criterion = torch.nn.CrossEntropyLoss() # Crea la funzione di loss
