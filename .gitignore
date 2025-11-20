@@ -14,3 +14,4 @@ models/*
 models/
 *.pt
 *.h5
+nohup/20_11/test_residual_network

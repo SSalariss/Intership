@@ -24,14 +24,14 @@ CONFIG = {
     'model_name': 'google/byt5-small',
     'max_length': 2048,
     'batch_size': 2,
-    'learning_rate': 3e-5,
+    'learning_rate': 5e-5,
     'num_epochs': 15,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
     'debug_mode': True,         # True = usa subset, False = dataset completo
-    'debug_train_size': 4000,
-    'debug_test_size': 800
+    'debug_train_size': 10000,
+    'debug_test_size': 2000
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -347,7 +347,7 @@ def train_model(model, train_loader, test_loader, config):
     # loop 
     optimizer = torch.optim.AdamW(
         model.classifier.parameters(), 
-        lr = 3e-5, 
+        lr = 5e-5, 
         weight_decay = 0.05
     )
 
@@ -368,7 +368,7 @@ def train_model(model, train_loader, test_loader, config):
     
     # Variabili per salvare best model
     best_test_acc = 0.0
-    best_epoch = 0
+    #best_epoch = 0
 
     print("\nINIZIO TRAINING\n")
 
@@ -391,7 +391,7 @@ def train_model(model, train_loader, test_loader, config):
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
-            best_epoch = epoch + 1
+            #best_epoch = epoch + 1
 
             # Salva checkpoint
             os.makedirs(config['save_dir'], exist_ok=True)
@@ -407,21 +407,22 @@ def train_model(model, train_loader, test_loader, config):
                 'config': config
             }, model_path)
             print(f" Salvato il miglior modello (test_acc: {test_acc:.4f}({test_acc*100:.2f}%)")
-        
+        ''' 
         # Check early stopping
         if early_stopping(test_acc, epoch + 1):
             print(f"\n Training terminato a epoch {epoch + 1}")
             print(f" Best model salvato: epoch {best_epoch} (test_acc: {best_test_acc:.4f})")
             break
-    else:
-        # Training completato senza early stopping
-        print(f"\n{'='*60}")
-        print(f" TRAINING COMPLETATO")
-        print(f" Tutte le {config['num_epochs']} epoch eseguite")
-        print(f" Best test accuracy: {best_test_acc:.4f} (epoch {best_epoch})")
-        print(f"{'='*60}\n")
+        '''
     
-    return best_test_acc, best_epoch
+    # Training completato senza early stopping
+    print(f"\n{'='*60}")
+    print(f" TRAINING COMPLETATO")
+    print(f" Tutte le {config['num_epochs']} epoch eseguite")
+    print(f" Best test accuracy: {best_test_acc:.4f} ")
+    print(f"{'='*60}\n")
+    
+    return best_test_acc
 
 def get_vram_usage(device):
     free, total = torch.cuda.mem_get_info(device)
