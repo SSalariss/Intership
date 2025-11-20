@@ -23,13 +23,13 @@ CONFIG = {
     'max_length': 2048,
     'batch_size': 4,
     'learning_rate': 5e-5,
-    'num_epochs': 4,
+    'num_epochs': 15,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
     'debug_mode': True,      # True = usa subset, False = dataset completo
-    'debug_train_size': 4000,
-    'debug_test_size': 800
+    'debug_train_size': 12000,
+    'debug_test_size': 2400
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -267,7 +267,7 @@ def train_model(model, train_loader, test_loader, config):
     
     # learning rate scheduler
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='max', factor=0.5, patience=3
+        optimizer, mode='min', factor=0.5, patience=3
     ) 
     
 
@@ -285,7 +285,7 @@ def train_model(model, train_loader, test_loader, config):
         test_loss, test_acc = evaluate(model, test_loader, criterion, config)
         
         # Update scheduler
-        scheduler.step(test_acc)
+        scheduler.step(test_loss)
 
         # Print risultati
         print(f"\n{'─'*60}")
