@@ -20,14 +20,15 @@ except ImportError:
 CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
-    'max_length': 2048,
-    'batch_size': 4,
+    'max_length': 3072,
+    'batch_size': 2,
+    'accum_steps': 8,
     'learning_rate': 5e-5,
     'num_epochs': 15,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
-    'debug_mode': True,      # True = usa subset, False = dataset completo
+    'debug_mode': False,      # True = usa subset, False = dataset completo
     'debug_train_size': 12000,
     'debug_test_size': 2400
 }
@@ -104,7 +105,7 @@ class ByT5Classifier(torch.nn.Module):
         '''
         tre layer permettono al modello di imparare rappresentazioni intermedie che 
         trasformano lo spazio originale di 1472 dimensioni in uno spazio di decisione per le classificazioni.
-        '''
+
         self.classifier = torch.nn.Sequential(
             torch.nn.Linear(hidden_size, 512),   # piu neuroni
             torch.nn.ReLU(),
@@ -116,6 +117,15 @@ class ByT5Classifier(torch.nn.Module):
             torch.nn.ReLU(),
             torch.nn.Dropout(0.1),              # 20% dei neuroni disattivati
             torch.nn.Linear(128, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
+        )
+        '''
+
+        self.classifier = torch.nn.Sequential(
+            torch.nn.Linear(hidden_size, 256),
+            torch.nn.LayerNorm(256),  # Stabilizzatore
+            torch.nn.ReLU(),
+            torch.nn.Dropout(0.1),
+            torch.nn.Linear(256, num_labels)
         )
 
     def forward(self,input_ids,attention_mask):
@@ -147,8 +157,9 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
     for chunk, label in zip(chunks, labels):
         # il tokenizer gestisce i byte
         # dobbiamo converirli in stringhe utf8
-        text = chunk.decode('utf-8', errors='ignore')
-        
+        # text = chunk.decode('utf-8', errors='ignore')
+
+        text = chunk.decode('latin-1')
         texts.append(text)
         batch_labels.append(label)
 
@@ -175,9 +186,14 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
     total_loss = 0      # accumula il loss
     correct = 0         # conta il numero di predizioni corrette
     total = 0           # numero di campioni per l'accuracy
-    
+
+    # Accumulation gradient
+    accumulation_steps = config.get('accump_steps', 8)
+    optimizer.zero_grad()  # IMPORTANTE: Azzerare PRIMA del loop
+
     pbar = tqdm(dataloader, desc="Training")
-    for chunks, labels in pbar:
+    #for chunks, labels in pbar:
+    for i, (chunks, labels) in enumerate(pbar):
         '''
         La barra mostra:
             - Percentuale completata
@@ -188,37 +204,73 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
         input_ids, attention_mask, labels = prepare_batch(
             chunks, labels, model.tokenizer, config['max_length'], config['device']
         ) # ritorna input_ids, attention_mask e labels
+
+        # rimettere qua l'opitmizer se togli accumulation
+        #optimizer.zero_grad()                       # azzera i gradienti (pytorch li accumula di default)
         
-        optimizer.zero_grad()                       # azzera i gradienti (pytorch li accumula di default)
+        # Forward pass
         logits = model(input_ids, attention_mask)   # byte -> hidden states, mean pooling, classification head
         loss = criterion(logits, labels)            # confronta i logits con le etichette vere (errore)
-        loss.backward()                             # calcola i gradienti della loss
         
+        # Scale loss
+        loss = loss / accumulation_steps
+        
+        # Backward (accumula i gradienti)
+        loss.backward()                             # calcola i gradienti della loss
+
+        # Step (Solo ogni N batch)
+        if (i + 1) % accumulation_steps == 0:
+            # Gradient Clipping (opzionale ma raccomandato)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
+            optimizer.step()      # Aggiorna i pesi
+            optimizer.zero_grad() # Reset dei gradienti
+
+
         '''
+        da rimettere se togli accumulation, e togliere l'if sopra
+
         I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
         Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
-        '''
+        
         # Gradient Clipping
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-       
+
         optimizer.step()                                # Aggiorna i pesi
         
         total_loss += loss.item()                       # accumula la loss del batch corrente
+
+        '''
+        # --- Metriche per logging ---
+        # Moltiplichiamo di nuovo per mostrare la loss "vera" del singolo batch
+        current_loss = loss.item() * accumulation_steps 
+        total_loss += current_loss
+
         predictions = torch.argmax(logits, dim=1)       # ottiene la classe predetta per ogni campione del batch
         correct += (predictions == labels).sum().item() # Conta quanti campioni sono stati predetti correttamente: prodotti vs etichette
         total += labels.size(0)                         # Conta il numero totale di campioni
         
+        pbar.set_postfix({'loss': f'{current_loss:.4f}', 'acc': f'{correct/total:.4f}'})
+
+        '''
         # progress bar
         current_acc = correct / total                   # Accuratezza parziale sui batch fino a questo punto
         pbar.set_postfix({
             'loss': f'{loss.item():.4f}',               # loss dell'ultimo batch
             'acc': f'{current_acc:.4f}'                 # accuracy cumulativa
         })
+        '''
+    # Gestione dell'ultimo batch se il dataset non è perfettamente divisibile
+    if len(dataloader) % accumulation_steps != 0:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        optimizer.zero_grad()
     
     avg_loss = total_loss / len(dataloader)
     accuracy = correct / total
     
     return avg_loss, accuracy
+    
 
 def evaluate(model, dataloader, criterion, config):
     # Valutazione del modello
@@ -312,6 +364,7 @@ def train_model(model, train_loader, test_loader, config):
 
 def main():
 
+    print(" With latin-1 & accumulation Gradient")
     # carichiamo il dataset
     try:
         train_dataset, test_dataset, info = load_dataset(CONFIG['dataset_dir'])
