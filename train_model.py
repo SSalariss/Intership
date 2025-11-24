@@ -5,9 +5,6 @@ import os
 import pickle
 from transformers import AutoTokenizer, T5EncoderModel
 from tqdm import tqdm
-import h5py
-
-
 
 # Importa gpu_selector
 try:
@@ -22,16 +19,17 @@ except ImportError:
 CONFIG = {
     'dataset_dir': './dataset',
     'model_name': 'google/byt5-small',
-    'max_length': 2048,
+    'max_length': 3072,
     'batch_size': 2,
+    'accum_steps': 8,
     'learning_rate': 5e-5,
     'num_epochs': 15,
     'device': DEVICE,
     'seed': 42,
     'save_dir': './models',
-    'debug_mode': True,         # True = usa subset, False = dataset completo
-    'debug_train_size': 10000,
-    'debug_test_size': 2000
+    'debug_mode': False,      # True = usa subset, False = dataset completo
+    'debug_train_size': 12000,
+    'debug_test_size': 2400
 }
 
 torch.manual_seed(CONFIG['seed'])
@@ -42,117 +40,26 @@ if CONFIG['device'] == 'cuda':
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"VRAM disponibile: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
-class EarlyStopping:
-    """
-    Early stopping per fermare il training quando test accuracy smette di migliorare
-    """
-    def __init__(self, patience=5, min_delta=0.0001, verbose=True):
-        """
-        Args:
-            patience: Numero di epoch da aspettare senza miglioramento
-            min_delta: Miglioramento minimo considerato significativo (0.005 = 0.5%)
-            verbose: Stampa messaggi
-        """
-        self.patience = patience
-        self.min_delta = min_delta
-        self.verbose = verbose
-        self.counter = 0
-        self.best_acc = None
-        self.should_stop = False
-        self.best_epoch = 0
-
-    def __call__(self, current_acc, current_epoch):
-        """
-        Controlla se fermare il training
-        
-        Returns:
-            True se bisogna fermare, False altrimenti
-        """
-        if self.best_acc is None:
-            # Prima epoch
-            self.best_acc = current_acc
-            self.best_epoch = current_epoch
-            if self.verbose:
-                print(f" EarlyStopping inizializzato (best: {self.best_acc:.4f})")
-        
-        elif current_acc < self.best_acc + self.min_delta:
-            # Accuracy non è migliorata abbastanza
-            self.counter += 1
-            if self.verbose:
-                print(f" EarlyStopping counter: {self.counter}/{self.patience} (best: {self.best_acc:.4f} @ epoch {self.best_epoch})")
-            
-            if self.counter >= self.patience:
-                self.should_stop = True
-                if self.verbose:
-                    print(f"\n{'='*60}")
-                    print(f" EARLY STOPPING ATTIVATO")
-                    print(f" Nessun miglioramento per {self.patience} epoch consecutive")
-                    print(f" Best accuracy: {self.best_acc:.4f} (epoch {self.best_epoch})")
-                    print(f"{'='*60}\n")
-                return True
-        
-        else:
-            # Accuracy migliorata
-            improvement = current_acc - self.best_acc
-            self.best_acc = current_acc
-            self.best_epoch = current_epoch
-            self.counter = 0
-            if self.verbose:
-                print(f" Accuracy migliorata di {improvement:.4f} ({improvement*100:.2f}%)")
-        
-        return False
-    
-    def reset(self):
-        """Reset dello stato (utile per nuovi training)"""
-        self.counter = 0
-        self.best_acc = None
-        self.should_stop = False
-        self.best_epoch = 0
-
-class Residual(torch.nn.Module):
-    def __init__(self, layer):
-        super().__init__()
-        self.layer = layer
-
-    def forward(self, x):
-        return x + self.layer(x)
-
 
 # Dataset
-class LazyChunkDataset(Dataset):
 
-    def __init__(self, h5_path):
-        self.h5_path = h5_path
+class ChunkDataset(Dataset):
 
-        # Leggiamo solo metadata 
-        with h5py.File(h5_path, 'r') as f:
-            self.length = len(f['labels'])
-            self.max_chunk_size = f.attrs['max_chunk_size']
-        
-        self.file = None  # Sarà aperto lazy
+    def __init__(self, chunks, labels):
+        self.chunks = chunks
+        self.labels = labels
 
     def __len__(self):
-        return self.length
+        return len(self.chunks)
 
     def __getitem__(self, idx):
-        # Apri il file solo al primo accesso
-        if self.file is None:
-            self.file = h5py.File(self.h5_path, 'r')
-        
-        # Carichiamo solo il chunk richiesto
-        chunks_array = self.file['chunks'][idx]
-        label = int(self.file['labels'][idx])
-
-        # Rimuovi padding (byte zero all fine)
-        chunk = bytes(chunks_array[chunks_array != 0])
-
-        return chunk, label
-
+        return self.chunks[idx], self.labels[idx]
     
 def load_dataset(dataset_dir):
     # carica del dataset 
-    train_path = os.path.join(dataset_dir, 'train_data.h5')
-    test_path = os.path.join(dataset_dir, 'test_data.h5')
+
+    train_path = os.path.join(dataset_dir, 'train_data.pkl')
+    test_path = os.path.join(dataset_dir, 'test_data.pkl')
     info_path = os.path.join(dataset_dir, 'dataset_info.pkl')
 
     if not os.path.exists(train_path):
@@ -160,16 +67,22 @@ def load_dataset(dataset_dir):
     
     print("\nCaricamento dataset...")
 
-    train_dataset = LazyChunkDataset(train_path)
-    test_dataset = LazyChunkDataset(test_path)
+    with open(train_path, 'rb') as f:
+        train_data = pickle.load(f)
+    
+    with open(test_path, 'rb') as f:
+        test_data = pickle.load(f)
 
     with open(info_path, 'rb') as f:
         info = pickle.load(f)
 
-    print(f" Train: {len(train_dataset)} chunk")
-    print(f" Test: {len(test_dataset)} chunk")
+    print(f" Train: {len(train_data['chunks'])} chunk")
+    print(f" Test: {len(test_data['chunks'])} chunk")
     print(f" Chunk size: {info['chunk_size']} byte")
     print(f" Classi: {info['class_names']}")
+
+    train_dataset = ChunkDataset(train_data['chunks'], train_data['labels'])
+    test_dataset = ChunkDataset(test_data['chunks'], test_data['labels'])
 
     return train_dataset, test_dataset, info
 
@@ -179,61 +92,41 @@ class ByT5Classifier(torch.nn.Module):
     def __init__(self, model_name, num_labels=2):
         super().__init__()
         print(f"\nCaricamento modello {model_name}...")
-        
+
         # carica tokenizer e encoder
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.encoder = T5EncoderModel.from_pretrained(model_name)
-        '''
-        for param in self.encoder.encoder.parameters():
-            param.requires_grad = False
-        '''
 
         #d_model:  dimensione encoder output nel nostro caso small 1472
         hidden_size = self.encoder.config.d_model # dimensione del vettore di rappresentazione
 
         # Classification head: layer da eseguire
-        '''
-        tre layer permettono al modello di imparare rappresentazioni intermedie che 
-        trasformano lo spazio originale di 1472 dimensioni in uno spazio di decisione per le classificazioni.
-        '''
         self.classifier = torch.nn.Sequential(
-            Residual(torch.nn.Sequential( 
-                torch.nn.Linear(hidden_size, hidden_size),  # piu neuroni
-                torch.nn.ReLU()
-            )),
-            #torch.nn.Dropout(0.4),
-            torch.nn.Linear(hidden_size, 1024),
+            torch.nn.Linear(hidden_size, 256),
+            torch.nn.LayerNorm(256),  # Stabilizzatore
             torch.nn.ReLU(),
-            Residual(torch.nn.Sequential( 
-                torch.nn.Linear(1024, 1024),  # piu neuroni
-                torch.nn.ReLU()
-            )),                           
-            #torch.nn.Dropout(0.3),              
-            torch.nn.Linear(1024, 512),
-            torch.nn.ReLU(),
-            Residual(torch.nn.Sequential( 
-                torch.nn.Linear(512, 512),  # piu neuroni
-                torch.nn.ReLU()
-            )),    
-            torch.nn.Linear(512, 256),
-            torch.nn.ReLU(),
-            #torch.nn.Dropout(0.3),              # 20% dei neuroni disattivati
-            torch.nn.Linear(256, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
+            torch.nn.Dropout(0.1),
+            torch.nn.Linear(256, num_labels)
         )
 
-    def forward(self, input_ids, attention_mask):
-        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
-        hidden_states = outputs.last_hidden_state  # [batch, seq, 1472]
-        
-        mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.size()).float()
-        
-        # Mean pooling
-        sum_hidden = torch.sum(hidden_states * mask_expanded, 1)
-        sum_mask = torch.clamp(mask_expanded.sum(1), min=1e-9)
-        mean_pool = sum_hidden / sum_mask  # [batch, 1472]
-        
-        logits = self.classifier(mean_pool)
-        return logits
+    def forward(self,input_ids,attention_mask):
+        #L'encoder di ByT5 processa i 2048 byte attraverso 12 layer di transformer
+        outputs = self.encoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask
+        )
+
+        # convertire una sequenza variabile di token in una singola rappresentazione fissa pronta per la classificazione.
+        # mean pooling
+        hidden_states = outputs.last_hidden_state                                           # last_hidden_state è un tensore di dimensione [batch_size, sequence_length, hidden_size].
+        mask_expanded = attention_mask.unsqueeze(-1).expand(hidden_states.size()).float()   # espande l'attention mask per far corrispondere la forma degli hidden states, permettendo di applicare il mask a ogni dimensione
+        sum_hidden = torch.sum(hidden_states * mask_expanded, 1)                            # somma i contributi di tutti i token reali (escludendo il padding) per ogni hidden state [1 è la dimensione]
+        sum_mask = torch.clamp(mask_expanded.sum(1), min=1e-9)                              # somma il mask e applica un limite minimo per evitare divisioni per zero
+        pooled = sum_hidden / sum_mask                                                      # Questa riga calcola la media degli hidden states, dividendo la somma per il numero di token reali
+
+        # Classifica
+        logits = self.classifier(pooled)
+        return logits # ritorniamo il logit da passare
     
 
 def prepare_batch(chunks, labels, tokenizer, max_length, device):
@@ -245,19 +138,19 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
     for chunk, label in zip(chunks, labels):
         # il tokenizer gestisce i byte
         # dobbiamo converirli in stringhe utf8
-        text = chunk.decode('utf-8', errors='ignore')
-        # sostiuiamo con latin 1 che preserva i byte mappandoli senza resituire <UNK>
-        #text = chunk.decode('latin-1')
+        # text = chunk.decode('utf-8', errors='ignore')
+
+        text = chunk.decode('latin-1')
         texts.append(text)
         batch_labels.append(label)
 
     #Tokenizza
     encoded = tokenizer(
-        texts,                      # stringhe da tokenizzare
-        padding='max_length',       # aggiungiamo padding
-        truncation=True,            # tronchiamo le sequenze maggiori di Max Length byte
+        texts,                  # stringhe da tokenizzare
+        padding='max_length',   # aggiungiamo padding
+        truncation=True,        # tronchiamo le sequenze maggiori di 1024 byte
         max_length=max_length,
-        return_tensors='pt'         # ritorna un tensore
+        return_tensors='pt'      # ritorna un tensore
     )
 
     input_ids = encoded['input_ids'].to(device)
@@ -270,13 +163,18 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
 def train_epoch(model, dataloader, optimizer, criterion, config):
     # un epoch
     model.train()       # modalità training
-
+    
     total_loss = 0      # accumula il loss
     correct = 0         # conta il numero di predizioni corrette
     total = 0           # numero di campioni per l'accuracy
 
+    
+    # Accumulation gradient
+    accumulation_steps = config.get('accum_steps', 8)
+    optimizer.zero_grad()  # IMPORTANTE: Azzerare PRIMA del loop
+
     pbar = tqdm(dataloader, desc="Training")
-    for chunks, labels in pbar:
+    for i, (chunks, labels) in enumerate(pbar):
         '''
         La barra mostra:
             - Percentuale completata
@@ -288,35 +186,56 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
             chunks, labels, model.tokenizer, config['max_length'], config['device']
         ) # ritorna input_ids, attention_mask e labels
         
-        optimizer.zero_grad()                       # azzera i gradienti (pytorch li accumula di default)
-
+        # Forward pass
         logits = model(input_ids, attention_mask)   # byte -> hidden states, mean pooling, classification head
         loss = criterion(logits, labels)            # confronta i logits con le etichette vere (errore)
-        loss.backward()                             # Accumula i gradienti
-        '''
-        I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
-        Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
-        '''  
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)   
-        optimizer.step()                                # Aggiorna i pesi
+
         
-        total_loss += loss.item()                       # accumula la loss del batch corrente
+        # Scale loss
+        loss = loss / accumulation_steps
+        
+        # Backward (accumula i gradienti)
+        loss.backward()                             # calcola i gradienti della loss
+
+        
+        # Step (Solo ogni N batch)
+        if (i + 1) % accumulation_steps == 0:
+            '''
+            I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
+            Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
+            '''
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
+            optimizer.step()      # Aggiorna i pesi
+            optimizer.zero_grad() # Reset dei gradienti
+    
+        # --- Metriche per logging ---
+        # Moltiplichiamo di nuovo per mostrare la loss "vera" del singolo batch
+        current_loss = loss.item() * accumulation_steps 
+        total_loss += current_loss
+
         predictions = torch.argmax(logits, dim=1)       # ottiene la classe predetta per ogni campione del batch
         correct += (predictions == labels).sum().item() # Conta quanti campioni sono stati predetti correttamente: prodotti vs etichette
         total += labels.size(0)                         # Conta il numero totale di campioni
         
-        # progress bar
-        current_acc = correct / total                   # Accuratezza parziale sui batch fino a questo punto
-        pbar.set_postfix({
-            'loss': f'{loss.item():.4f}',               # loss dell'ultimo batch
-            'acc': f'{current_acc:.4f}'                 # accuracy cumulativa
-        })
-    avg_loss = total_loss / len(dataloader) 
-    accuracy = correct / total  
+        pbar.set_postfix({'loss': f'{current_loss:.4f}', 'acc': f'{correct/total:.4f}'})
+        
+    
+    # Gestione dell'ultimo batch se il dataset non è perfettamente divisibile
+    if len(dataloader) % accumulation_steps != 0:
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        optimizer.zero_grad()
+    
+    avg_loss = total_loss / len(dataloader)
+    accuracy = correct / total
+    
     return avg_loss, accuracy
+    
 
 def evaluate(model, dataloader, criterion, config):
     # Valutazione del modello
+
     model.eval()
 
     total_loss=0
@@ -329,9 +248,11 @@ def evaluate(model, dataloader, criterion, config):
             input_ids, attention_mask, labels = prepare_batch(
                 chunks, labels, model.tokenizer, config['max_length'], config['device']
             ) # tensori pronti per il modello
+
             # Forward pass
             logits = model(input_ids, attention_mask)
             loss = criterion(logits, labels)
+
             total_loss += loss.item()
 
             predictions = torch.argmax(logits, dim=1)
@@ -341,34 +262,29 @@ def evaluate(model, dataloader, criterion, config):
     #calcolo delle metriche finali
     avg_loss = total_loss / len(dataloader)
     accuracy = correct / total
+
+    
     return avg_loss, accuracy
 
 def train_model(model, train_loader, test_loader, config):
-    # loop 
+    # loop completo
+
     optimizer = torch.optim.AdamW(
-        model.classifier.parameters(), 
-        lr = 5e-5, 
-        weight_decay = 0.05
+        model.parameters(),
+        lr=config['learning_rate'],
+        weight_decay=0.05
     )
 
     criterion = torch.nn.CrossEntropyLoss() # Crea la funzione di loss
 
-    '''
-    # Inizializza early stopping
-    early_stopping = EarlyStopping(
-        patience=config.get('early_stopping_patience', 2),
-        min_delta=config.get('early_stopping_min_delta', 0.005),
-        verbose=True
-    )
-    '''
-
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode='min', factor=0.1, patience=5, min_lr=0
-        )
     
-    # Variabili per salvare best model
-    best_test_acc = 0.0
-    #best_epoch = 0
+    # learning rate scheduler
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, mode='min', factor=0.5, patience=3
+    ) 
+    
+
+    best_test_acc = 0
 
     print("\nINIZIO TRAINING\n")
 
@@ -377,11 +293,13 @@ def train_model(model, train_loader, test_loader, config):
 
         # Training
         train_loss,train_acc = train_epoch(model, train_loader, optimizer, criterion, config)
-        
+
         # Evaluation
         test_loss, test_acc = evaluate(model, test_loader, criterion, config)
         
+        # Update scheduler
         scheduler.step(test_loss)
+
         # Print risultati
         print(f"\n{'─'*60}")
         print(f"Risultati Epoch {epoch + 1}:")
@@ -391,9 +309,6 @@ def train_model(model, train_loader, test_loader, config):
 
         if test_acc > best_test_acc:
             best_test_acc = test_acc
-            #best_epoch = epoch + 1
-
-            # Salva checkpoint
             os.makedirs(config['save_dir'], exist_ok=True)
             model_path = os.path.join(config['save_dir'], 'best_model.pt')
             torch.save({
@@ -402,68 +317,41 @@ def train_model(model, train_loader, test_loader, config):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'test_acc:': test_acc,
                 'test_loss': test_loss,
-                'train_acc': train_acc,
-                'train_loss': train_loss,
                 'config': config
             }, model_path)
             print(f" Salvato il miglior modello (test_acc: {test_acc:.4f}({test_acc*100:.2f}%)")
-        ''' 
-        # Check early stopping
-        if early_stopping(test_acc, epoch + 1):
-            print(f"\n Training terminato a epoch {epoch + 1}")
-            print(f" Best model salvato: epoch {best_epoch} (test_acc: {best_test_acc:.4f})")
-            break
-        '''
-    
-    # Training completato senza early stopping
-    print(f"\n{'='*60}")
-    print(f" TRAINING COMPLETATO")
-    print(f" Tutte le {config['num_epochs']} epoch eseguite")
-    print(f" Best test accuracy: {best_test_acc:.4f} ")
-    print(f"{'='*60}\n")
-    
+
     return best_test_acc
 
-def get_vram_usage(device):
-    free, total = torch.cuda.mem_get_info(device)
-    vram_usage = (total - free) / (1024 ** 2) # MB
-    return vram_usage
-
 def main():
+
+    print(" With latin-1 & accumulation gradient with 2 batch size and 8 steps")
     # carichiamo il dataset
     try:
         train_dataset, test_dataset, info = load_dataset(CONFIG['dataset_dir'])
     except FileNotFoundError as e:
         print(f"\n Errore nel caricamento del dataset: {e}")
         return
-
+    
     if CONFIG['debug_mode']:
         from torch.utils.data import Subset
         train_dataset = Subset(train_dataset, range(CONFIG['debug_train_size']))
         test_dataset = Subset(test_dataset, range(CONFIG['debug_test_size']))
         print(f"\n DEBUG MODE: {CONFIG['debug_train_size']} train, {CONFIG['debug_test_size']} test")
-
+    
     # Crea DataLoader
     train_loader = DataLoader(
         train_dataset,
         batch_size=CONFIG['batch_size'],
         shuffle=True, 
-        num_workers=8,
-        pin_memory=True,
-        prefetch_factor=4,
-        persistent_workers=True,
-        multiprocessing_context='fork'
+        num_workers = 0 
     )
 
     test_loader = DataLoader(
         test_dataset,
         batch_size=CONFIG['batch_size'],
         shuffle=False,
-        num_workers=8,
-        pin_memory=True,
-        prefetch_factor=4,
-        persistent_workers=True,
-        multiprocessing_context='fork'
+        num_workers=0
     )
 
     print(f"\nBatch size: {CONFIG['batch_size']}")
@@ -472,21 +360,19 @@ def main():
 
     print(f"\n Learning Rate: {CONFIG['learning_rate']}")
 
-
-    print(f"\n Vram iniziale: {get_vram_usage(CONFIG['device'])}")
-
     # Inizializzazione del modello
     model = ByT5Classifier(CONFIG['model_name'], num_labels=2).to(CONFIG['device'])
 
-    # Debugging memoria
-    print(f"\n Vram dopo Model Load: {get_vram_usage(CONFIG['device'])}")
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+
+    #print(f"\nParametri totali: {total_params:,}")
+    #print(f"Parametri trainable: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
 
     # Fase di Training 
     train_model(model, train_loader, test_loader, CONFIG)
 
-    print(f"\n Vram dopo training: {get_vram_usage(CONFIG['device'])}")
-
-    # Carica best model
+     # Carica best model
     print("\nCaricamento del miglior modello per valutazione finale...")
     checkpoint = torch.load(os.path.join(CONFIG['save_dir'], 'best_model.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
