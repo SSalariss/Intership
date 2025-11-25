@@ -41,7 +41,6 @@ if CONFIG['device'] == 'cuda':
 
 
 # Dataset
-
 class ChunkDataset(Dataset):
 
     def __init__(self, chunks, labels):
@@ -100,24 +99,6 @@ class ByT5Classifier(torch.nn.Module):
         hidden_size = self.encoder.config.d_model # dimensione del vettore di rappresentazione
 
         # Classification head: layer da eseguire
-        '''
-        tre layer permettono al modello di imparare rappresentazioni intermedie che 
-        trasformano lo spazio originale di 1472 dimensioni in uno spazio di decisione per le classificazioni.
-
-        self.classifier = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 512),   # piu neuroni
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.3),
-            torch.nn.Linear(512, 256),          # comprime le feature in trasformazione lineare
-            torch.nn.ReLU(),                    # introduce la non-linearità ReLU(x) = max(0,x)
-            torch.nn.Dropout(0.2),              # disattiva dei neuroni per prevenire overfitting
-            torch.nn.Linear(256, 128),
-            torch.nn.ReLU(),
-            torch.nn.Dropout(0.1),              # 20% dei neuroni disattivati
-            torch.nn.Linear(128, num_labels)    # riduce progressivamente la dimensionalità fino a ottenere le previsioni finali
-        )
-        '''
-
         self.classifier = torch.nn.Sequential(
             torch.nn.Linear(hidden_size, 256),
             torch.nn.LayerNorm(256),  # Stabilizzatore
@@ -185,14 +166,8 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
     correct = 0         # conta il numero di predizioni corrette
     total = 0           # numero di campioni per l'accuracy
 
-    '''
-    # Accumulation gradient
-    accumulation_steps = config.get('accump_steps', 8)
-    optimizer.zero_grad()  # IMPORTANTE: Azzerare PRIMA del loop
-    '''
+    
     pbar = tqdm(dataloader, desc="Training")
-    #for i, (chunks, labels) in enumerate(pbar):
-
     for chunks, labels in pbar:
         '''
         La barra mostra:
@@ -212,22 +187,9 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
         logits = model(input_ids, attention_mask)   # byte -> hidden states, mean pooling, classification head
         loss = criterion(logits, labels)            # confronta i logits con le etichette vere (errore)
 
-        '''
-        # Scale loss
-        loss = loss / accumulation_steps
-        '''
         # Backward (accumula i gradienti)
         loss.backward()                             # calcola i gradienti della loss
 
-        '''
-        # Step (Solo ogni N batch)
-        if (i + 1) % accumulation_steps == 0:
-            # Gradient Clipping (opzionale ma raccomandato)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            
-            optimizer.step()      # Aggiorna i pesi
-            optimizer.zero_grad() # Reset dei gradienti
-        '''
         '''
         I gradienti possono diventare troppo grandi, causando aggiornamenti instabili e oscillazioni della loss
         Il gradient clipping scala verso il basso tutti i gradienti se la loro norma complessiva supera la soglia
@@ -239,20 +201,10 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
         
         total_loss += loss.item()                       # accumula la loss del batch corrente
 
-        '''
-        # --- Metriche per logging ---
-        # Moltiplichiamo di nuovo per mostrare la loss "vera" del singolo batch
-        current_loss = loss.item() * accumulation_steps 
-        total_loss += current_loss
-        '''
-
         predictions = torch.argmax(logits, dim=1)       # ottiene la classe predetta per ogni campione del batch
         correct += (predictions == labels).sum().item() # Conta quanti campioni sono stati predetti correttamente: prodotti vs etichette
         total += labels.size(0)                         # Conta il numero totale di campioni
-        
-        #pbar.set_postfix({'loss': f'{current_loss:.4f}', 'acc': f'{correct/total:.4f}'})
-
-        
+                
         # progress bar
         current_acc = correct / total                   # Accuratezza parziale sui batch fino a questo punto
         pbar.set_postfix({
@@ -260,13 +212,6 @@ def train_epoch(model, dataloader, optimizer, criterion, config):
             'acc': f'{current_acc:.4f}'                 # accuracy cumulativa
         })
         
-    '''
-    # Gestione dell'ultimo batch se il dataset non è perfettamente divisibile
-    if len(dataloader) % accumulation_steps != 0:
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-        optimizer.zero_grad()
-    '''
     avg_loss = total_loss / len(dataloader)
     accuracy = correct / total
     
@@ -302,7 +247,6 @@ def evaluate(model, dataloader, criterion, config):
     #calcolo delle metriche finali
     avg_loss = total_loss / len(dataloader)
     accuracy = correct / total
-
     
     return avg_loss, accuracy
 
