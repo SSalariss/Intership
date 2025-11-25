@@ -18,15 +18,15 @@ from sklearn.model_selection import train_test_split
 CLASS_CONFIG = {
     'enc': {
         'dir': './data/enc',
-        'ext': '.enc',
+        'ext': '.bin',
         'label': 0,
         'name': 'ENC',
     },
     'other': {
-        'dir': './data/png',   # ./data/png o ./data/mp3
-        'ext': '.png',         #'.png' o '.mp3'
+        'dir': './data/mp3',   # ./data/png o ./data/mp3
+        'ext': '.mp3',         #'.png' o '.mp3'
         'label': 1,
-        'name': 'PNG',         # 'PNG' o 'MP3'
+        'name': 'MP3',         # 'PNG' o 'MP3'
     }
 }
 
@@ -36,7 +36,7 @@ CONFIG = {
     'total_chunks': 20000, # i chunk da estrarre
     'test_size': 0.2, # 20% per testing, 80% per il training
     'seed': 42,
-    'output_dir': './dataset/png'
+    'output_dir': './dataset/mp3'   # mp3 png pdf
 }
 
 random.seed(CONFIG['seed'])
@@ -130,6 +130,9 @@ def extract_chunks_from_files(
 # Salvataggio del dataset
 
 def save_dataset(chunks, labels, output_dir, test_size, seed):
+
+    other_name = CLASS_CONFIG['other']['name']
+
     # Salva il dataset in train e test
 
     # Crea directory per l'output
@@ -151,8 +154,8 @@ def save_dataset(chunks, labels, output_dir, test_size, seed):
     test_labels = [labels[i] for i in test_indices]
 
     print(f"\n== Split del dataset...")
-    print(f"Train: {len(train_chunks)} chunk ({sum(train_labels)} {other_name}, {len(train_labels)-sum(train_labels)} ENC)")
-    print(f"Test: {len(test_chunks)} chunk ({sum(test_labels)} {other_name}, {len(test_labels)-sum(test_labels)} ENC)")
+    print(f"Train: {len(train_chunks)} chunk ({sum(train_labels)} {other_name}), {len(train_labels)-sum(train_labels)} ENC)")
+    print(f"Test: {len(test_chunks)} chunk ({sum(test_labels)} {other_name}), {len(test_labels)-sum(test_labels)} ENC)")
 
     train_data = {
         'chunks': train_chunks,
@@ -201,7 +204,7 @@ def main():
     # Verifica che le directory esistano
     if not os.path.exists(ENC_DIR):
         print(f"\nERRORE: Directory '{ENC_DIR}' non trovata!")
-        print("Crea la cartella e inserisci i file .enc")
+        print("Crea la cartella e inserisci i file .bin")
         return
     if not os.path.exists(OTHER_DIR):
         print(f"\nERRORE: Directory '{OTHER_DIR}' non trovata!")
