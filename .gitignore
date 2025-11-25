@@ -6,12 +6,11 @@ dist/
 wheels/
 *.egg-info
 data/*
+dataset/*
 artifacts
 # Virtual environments
 .venv
 models/*
-models/
 *.pt
 *.h5
-nohup/20_11/test_residual_network
 nohup/*
