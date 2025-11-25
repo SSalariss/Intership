@@ -13,3 +13,4 @@ models/*
 models/
 *.pt
 nohup/*
+dataset/*
