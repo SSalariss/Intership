@@ -23,10 +23,10 @@ CLASS_CONFIG = {
         'name': 'ENC',
     },
     'other': {
-        'dir': './data/mp3',   # ./data/png o ./data/mp3
-        'ext': '.mp3',         #'.png' o '.mp3'
+        'dir': './data/jpg',   # ./data/png ; ./data/mp3 ; ./data/jpg
+        'ext': '.jpg',         #'.png' ; '.mp3' ; '.jpg'
         'label': 1,
-        'name': 'MP3',         # 'PNG' o 'MP3'
+        'name': 'JPG',         # 'PNG' ; 'MP3' ; 'JPG'
     }
 }
 
