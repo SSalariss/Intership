@@ -15,9 +15,8 @@ except ImportError:
     DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
     print(f"gpu_selector non trovato, uso: {DEVICE}")
 
-
 CONFIG = {
-    'dataset_dir': './dataset/png',
+    'dataset_dir': './dataset/mp3',
     'model_name': 'google/byt5-small',
     'max_length': 3072,
     'batch_size': 2,
@@ -26,8 +25,8 @@ CONFIG = {
     'num_epochs': 15,
     'device': DEVICE,
     'seed': 42,
-    'save_dir': './models_accumGrad/png',
-    'debug_mode': True,      # True = usa subset, False = dataset completo
+    'save_dir': './models_accumGrad/mp3',
+    'debug_mode': False,      # True = usa subset, False = dataset completo
     'debug_train_size': 10000,
     'debug_test_size': 2000
 }
@@ -40,9 +39,7 @@ if CONFIG['device'] == 'cuda':
     print(f"GPU: {torch.cuda.get_device_name(0)}")
     print(f"VRAM disponibile: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
 
-
 # Dataset
-
 class ChunkDataset(Dataset):
 
     def __init__(self, chunks, labels):
