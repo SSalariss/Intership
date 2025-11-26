@@ -17,7 +17,7 @@ except ImportError:
 
 
 CONFIG = {
-    'dataset_dir': './dataset/jpg',
+    'dataset_dir': './dataset/zip', # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
     'model_name': 'google/byt5-small',
     'max_length': 3072,
     'batch_size': 2,
@@ -25,7 +25,7 @@ CONFIG = {
     'num_epochs': 5,
     'device': DEVICE,
     'seed': 42,
-    'save_dir': './models/jpg',     # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE
+    'save_dir': './models/zip',     # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
     'debug_mode': False,             # True = usa subset, False = dataset completo
     'debug_train_size': 12000,
     'debug_test_size': 2400
