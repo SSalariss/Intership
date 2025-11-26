@@ -23,10 +23,10 @@ CLASS_CONFIG = {
         'name': 'ENC',
     },
     'other': {
-        'dir': './data/jpg',   # ./data/png ; ./data/mp3 ; ./data/jpg
-        'ext': '.jpg',         #'.png' ; '.mp3' ; '.jpg'
+        'dir': './data/zip',   # ./data/png ; ./data/mp3 ; ./data/jpg 
+        'ext': '.zip',         #'.png' ; '.mp3' ; '.jpg'
         'label': 1,
-        'name': 'JPG',         # 'PNG' ; 'MP3' ; 'JPG'
+        'name': 'ZIP',         # 'PNG' ; 'MP3' ; 'JPG' ; ZIP
     }
 }
 
@@ -36,7 +36,7 @@ CONFIG = {
     'total_chunks': 20000, # i chunk da estrarre
     'test_size': 0.2, # 20% per testing, 80% per il training
     'seed': 42,
-    'output_dir': './dataset/mp3'   # mp3 png pdf
+    'output_dir': './dataset/zip'   # mp3 png pdf jpg
 }
 
 random.seed(CONFIG['seed'])
@@ -236,7 +236,7 @@ def main():
     )
 
     # 3. Salva dataset
-    print("\n3. Salvataggio dataset...")
+    print(f"\n3. Salvataggio dataset in ...{CONFIG['output_dir']}")
     save_dataset(
         chunks,
         chunk_labels,
