@@ -17,15 +17,15 @@ except ImportError:
 
 
 CONFIG = {
-    'dataset_dir': './dataset/bz2', # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
+    'dataset_dir': './dataset/vp8', # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
     'model_name': 'google/byt5-small',
     'max_length': 3072,
     'batch_size': 2,
     'learning_rate': 5e-5,
-    'num_epochs': 5,
+    'num_epochs': 10,
     'device': DEVICE,
     'seed': 42,
-    'save_dir': './models/bz2',     # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
+    'save_dir': './models/vp8',     # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
     'debug_mode': False,             # True = usa subset, False = dataset completo
     'debug_train_size': 12000,
     'debug_test_size': 2400
@@ -146,7 +146,7 @@ def prepare_batch(chunks, labels, tokenizer, max_length, device):
     encoded = tokenizer(
         texts,                  # stringhe da tokenizzare
         padding='max_length',   # aggiungiamo padding
-        truncation=True,        # tronchiamo le sequenze maggiori di 1024 byte
+        truncation=True,        # tronchiamo le sequenze maggiori di 3072 byte
         max_length=max_length,
         return_tensors='pt'      # ritorna un tensore
     )
@@ -346,12 +346,6 @@ def main():
 
     # Inizializzazione del modello
     model = ByT5Classifier(CONFIG['model_name'], num_labels=2).to(CONFIG['device'])
-
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total_params = sum(p.numel() for p in model.parameters())
-
-    #print(f"\nParametri totali: {total_params:,}")
-    #print(f"Parametri trainable: {trainable_params:,} ({trainable_params/total_params*100:.1f}%)")
 
     # Fase di Training 
     train_model(model, train_loader, test_loader, CONFIG)

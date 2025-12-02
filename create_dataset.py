@@ -23,10 +23,10 @@ CLASS_CONFIG = {
         'name': 'ENC',
     },
     'other': {
-        'dir': './data/zip',   # ./data/png ; ./data/mp3 ; ./data/jpg 
-        'ext': '.zip',         #'.png' ; '.mp3' ; '.jpg'
+        'dir': './data/video_forms/vp8',   # ./data/png ; ./data/mp3 ; ./data/jpg ; data/comp_forms/zip ; data/comp_forms/gzip ;
+        'ext': '.webm',         #'.png' ; '.mp3' ; '.jpg' ; .zip ;'.gz'
         'label': 1,
-        'name': 'ZIP',         # 'PNG' ; 'MP3' ; 'JPG' ; ZIP
+        'name': 'VP8',         # 'PNG' ; 'MP3' ; 'JPG' ; ZIP ; RAR ; GZIP
     }
 }
 
@@ -36,7 +36,7 @@ CONFIG = {
     'total_chunks': 20000, # i chunk da estrarre
     'test_size': 0.2, # 20% per testing, 80% per il training
     'seed': 42,
-    'output_dir': './dataset/zip'   # mp3 png pdf jpg
+    'output_dir': './dataset/vp8'   # mp3 png pdf jpg rar gzip
 }
 
 random.seed(CONFIG['seed'])
