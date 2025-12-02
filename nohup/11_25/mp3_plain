@@ -1,0 +1,5 @@
+GPU assegnata: cuda:0
+Device: cuda:0
+ With latin-1 
+
+ Errore nel caricamento del dataset: Dataset non trovato in ./dataset/jpg.
