@@ -12,5 +12,4 @@ artifacts
 models/*
 models/
 *.pt
-nohup/*
 dataset/*
