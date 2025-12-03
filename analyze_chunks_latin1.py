@@ -207,7 +207,7 @@ def main():
     print(f"  UNK token:  {tokenizer.unk_token} (ID: {tokenizer.unk_token_id})")
     
     # Test token speciali
-    sample_text = chunks[0].decode('utf-8', errors='ignore')[:100]
+    sample_text = chunks[0].decode('latin-1')[:100]
     encoded = tokenizer(sample_text, return_tensors='pt')
     
     num_pad = (encoded['input_ids'] == tokenizer.pad_token_id).sum().item()
