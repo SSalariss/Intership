@@ -1,19 +1,13 @@
-
-#create_dataset.py
 """
 Preparazione del dataset con 20 mila chunk, da 2048 byte
 """
 import random
-import string
 import numpy as np
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 import os
 import pickle
 
 from sklearn.model_selection import train_test_split
-
-
 
 # Configurazione
 CONFIG = {
@@ -112,123 +106,6 @@ def extract_chunks_from_files(
 
     return all_chunks, all_labels
 
-# Analisi esplorativa per investigare sull'entropia di enc e pdf
-
-def exploratory_analysis(chunks, labels, sample_size=500):
-    """Analisi esplorativa dei chunk"""
-    print("\n Analisi esplorativa...\n")
-    
-    # Campiona chunk per l'analisi
-    bin_indices = [i for i, l in enumerate(labels) if l == 0]
-    pdf_indices = [i for i, l in enumerate(labels) if l == 1]
-    
-    # Prendiamo un sottoinsieme rappresentativo tramite gli indici con dimensione dettata da sample_size
-    bin_sample = random.sample(bin_indices, min(sample_size, len(bin_indices)))
-    pdf_sample = random.sample(pdf_indices, min(sample_size, len(pdf_indices)))
-    
-    def compute_stats(chunk_indices, label_name):
-        '''
-        L'entropia di Shannon misura la quantità media di informazione o "disordine" nei dati. 
-        Valori più alti indicano dati più casuali o più variabilità,
-        mentre valori bassi indicano dati più prevedibili.
-        '''
-        entropies = []
-        ascii_ratios = []
-        byte_distributions = np.zeros(256)
-        
-        for idx in chunk_indices:
-            chunk = chunks[idx]
-            byte_array = np.frombuffer(chunk, dtype=np.uint8)
-            
-            # Entropia di Shannon
-            hist, _ = np.histogram(byte_array, bins=256, range=(0, 256))
-            hist_normalized = hist / len(byte_array) # normalizzazione di hist: la somma degli elementi diventa 1
-            hist_nonzero = hist_normalized[hist_normalized > 0] # eliminazione degli zeri per evitare errori nel calcolo
-            entropy = -np.sum(hist_nonzero * np.log2(hist_nonzero)) # calcolo dell'entropia sulla distribuzione contenuta in hist
-            entropies.append(entropy) # accumulatore dell'entropia
-            
-            # ASCII printable ratio
-            ascii_count = np.sum((byte_array >= 32) & (byte_array <= 126)) # ascii stampabili
-            ascii_ratios.append(ascii_count / len(byte_array)) # rapporto tra char stampabili e lunghezza totale
-            
-            # Distribuzione byte aggregata
-            byte_distributions += hist 
-        
-        byte_distributions /= len(chunk_indices) # Frequenza media normalizzata
-        
-        # .3f: cifre decimali
-        print(f"\n{label_name}:")
-        print(f"  Entropia media: {np.mean(entropies):.3f} ± {np.std(entropies):.3f}")
-        print(f"  ASCII ratio medio: {np.mean(ascii_ratios):.3f} ± {np.std(ascii_ratios):.3f}")
-        print(f"  Min entropia: {np.min(entropies):.3f}")
-        print(f"  Max entropia: {np.max(entropies):.3f}")
-        
-        return entropies, ascii_ratios, byte_distributions
-    
-    bin_stats = compute_stats(bin_sample, "ENC")
-    pdf_stats = compute_stats(pdf_sample, "PDF")
-    
-    # Visualizzazioni: 2 righe, 2 colonne
-    # axes array 2D di oggetti, per ogni grafico della griglia
-    fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-    
-    # Entropia
-    '''
-    serve a visualizzare e confrontare la distribuzione 
-    dell'entropia calcolata su due insiemi di chunk, 
-    evidenziando differenze o similitudini nella variabilità informativa dei dati.
-    '''
-    axes[0, 0].hist(bin_stats[0], bins=30, alpha=0.6, label='ENC', color='blue', edgecolor='black')
-    axes[0, 0].hist(pdf_stats[0], bins=30, alpha=0.6, label='PDF', color='red', edgecolor='black')
-    axes[0, 0].set_xlabel('Entropia (bit)')
-    axes[0, 0].set_ylabel('Frequenza')
-    axes[0, 0].set_title('Distribuzione Entropia dei Chunk')
-    axes[0, 0].legend()
-    axes[0, 0].grid(alpha=0.3)
-    
-    # ASCII ratio
-    '''
-    Serve a visualizzare e confrontare la distribuzione delle 
-    proporzioni di caratteri ASCII stampabili tra i due gruppi di chunk, 
-    per comprendere meglio la composizione testuale o binaria 
-    dei dati nei due insiemi
-    '''
-    axes[0, 1].hist(bin_stats[1], bins=30, alpha=0.6, label='ENC', color='blue', edgecolor='black')
-    axes[0, 1].hist(pdf_stats[1], bins=30, alpha=0.6, label='PDF', color='red', edgecolor='black')
-    axes[0, 1].set_xlabel('ASCII Printable Ratio')
-    axes[0, 1].set_ylabel('Frequenza')
-    axes[0, 1].set_title('Distribuzione ASCII Ratio')
-    axes[0, 1].legend()
-    axes[0, 1].grid(alpha=0.3)
-    
-    # Distribuzione byte ENC
-    '''
-    serve a visualizzare la distribuzione media dei valori byte nei chunk 
-    appartenenti alla classe ENC, fornendo un dettaglio più granulare 
-    rispetto agli istogrammi precedenti.
-    '''
-    axes[1, 0].bar(range(256), bin_stats[2], color='blue', alpha=0.7)
-    axes[1, 0].set_xlabel('Valore Byte (0-255)')
-    axes[1, 0].set_ylabel('Frequenza Media')
-    axes[1, 0].set_title('Distribuzione Valori Byte - ENC')
-    axes[1, 0].grid(alpha=0.3)
-    
-    # Distribuzione byte PDF
-    '''
-    permette di visualizzare la distribuzione media dei valori di byte 
-    nei chunk appartenenti alla classe PDF, a complemento del grafico della classe ENC, 
-    facilitando il confronto tra le due distribuzioni
-    '''
-    axes[1, 1].bar(range(256), pdf_stats[2], color='red', alpha=0.7)
-    axes[1, 1].set_xlabel('Valore Byte (0-255)')
-    axes[1, 1].set_ylabel('Frequenza Media')
-    axes[1, 1].set_title('Distribuzione Valori Byte - PDF')
-    axes[1, 1].grid(alpha=0.3)
-    
-    plt.tight_layout() # migliorare la disposizione
-    
-    return fig
-
 # Salvataggio del dataset
 
 def save_dataset(chunks, labels, output_dir, test_size, seed):
@@ -305,8 +182,8 @@ def main():
         print("Crea la cartella e inserisci i file .pdf")
         return
     
-    # 1. Carica file paths
-    print("\n1. Caricamento file paths...")
+    # Carica file paths
+    print("\n Caricamento file paths...")
     bin_files = [os.path.join(BIN_DIR, f) for f in os.listdir(BIN_DIR) if f.endswith('.bin')]
     pdf_files = [os.path.join(PDF_DIR, f) for f in os.listdir(PDF_DIR) if f.endswith('.pdf')]
     
@@ -320,8 +197,8 @@ def main():
     file_paths = bin_files + pdf_files
     labels = [0] * len(bin_files) + [1] * len(pdf_files)
     
-    # 2. Estrai chunk
-    print(f"\n2. Estrazione {CONFIG['total_chunks']} chunk da {len(file_paths)} file...")
+    # Estrai chunk
+    print(f"\n Estrazione {CONFIG['total_chunks']} chunk da {len(file_paths)} file...")
     chunks, chunk_labels = extract_chunks_from_files(
         file_paths,
         labels,
@@ -329,19 +206,8 @@ def main():
         CONFIG['chunk_size']
     )
 
-    # 3. Analisi esplorativa
-    print("\n3. Analisi esplorativa dei chunk...")
-    fig = exploratory_analysis(chunks, chunk_labels)
-
-    # Salva grafico
-    output_path = os.path.join(CONFIG['output_dir'], 'eda_analysis.png')
-    os.makedirs(CONFIG['output_dir'], exist_ok=True)
-    fig.savefig(output_path, dpi=150, bbox_inches='tight')
-    print(f"   Grafico salvato in '{output_path}'")
-    plt.close()
-
-    # 4. Salva dataset
-    print("\n4. Salvataggio dataset...")
+    # Salva dataset
+    print("\n Salvataggio dataset...")
     save_dataset(
         chunks,
         chunk_labels,
