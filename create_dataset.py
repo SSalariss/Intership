@@ -1,10 +1,7 @@
-
-#create_dataset.py
 """
 Preparazione del dataset con 20 mila chunk, da 2048 byte
 """
 import random
-import string
 import numpy as np
 from tqdm import tqdm
 import os
@@ -211,8 +208,8 @@ def main():
         print("Crea la cartella e inserisci i file .other")
         return
     
-    # 1. Carica file paths
-    print("\n1. Caricamento file paths...")
+    # Carica file paths
+    print("\n Caricamento file paths...")
     enc_files = [os.path.join(ENC_DIR, f) for f in os.listdir(ENC_DIR) if f.endswith(ENC_EXT)]
     other_files = [os.path.join(OTHER_DIR, f) for f in os.listdir(OTHER_DIR) if f.endswith(OTHER_EXT)]
     
@@ -226,8 +223,8 @@ def main():
     file_paths = enc_files + other_files
     labels = [0] * len(enc_files) + [1] * len(other_files)
     
-    # 2. Estrai chunk
-    print(f"\n2. Estrazione {CONFIG['total_chunks']} chunk da {len(file_paths)} file...")
+    # Estrai chunk
+    print(f"\n Estrazione {CONFIG['total_chunks']} chunk da {len(file_paths)} file...")
     chunks, chunk_labels = extract_chunks_from_files(
         file_paths,
         labels,
@@ -235,8 +232,8 @@ def main():
         CONFIG['chunk_size']
     )
 
-    # 3. Salva dataset
-    print(f"\n3. Salvataggio dataset in ...{CONFIG['output_dir']}")
+    # Salva dataset
+    print(f"\n Salvataggio dataset in ...{CONFIG['output_dir']}")
     save_dataset(
         chunks,
         chunk_labels,

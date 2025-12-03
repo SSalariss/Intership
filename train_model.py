@@ -17,15 +17,15 @@ except ImportError:
 
 
 CONFIG = {
-    'dataset_dir': './dataset/vp8', # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
+    'dataset_dir': './dataset/h264', # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
     'model_name': 'google/byt5-small',
     'max_length': 3072,
     'batch_size': 2,
     'learning_rate': 5e-5,
-    'num_epochs': 10,
+    'num_epochs': 15,
     'device': DEVICE,
     'seed': 42,
-    'save_dir': './models/vp8',     # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
+    'save_dir': './models/video_forms/h264',     # DA CAMBIARE A SECONDA DEL TEST CHE SI SVOLGE !!
     'debug_mode': False,             # True = usa subset, False = dataset completo
     'debug_train_size': 12000,
     'debug_test_size': 2400
