@@ -37,7 +37,6 @@ CONFIG = {
 }
 
 random.seed(CONFIG['seed'])
-np.random.seed(CONFIG['seed'])
 
 # Estrazione Chunk
 
