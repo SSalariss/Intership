@@ -100,11 +100,11 @@ class ByT5Classifier(torch.nn.Module):
 
         # Classification head: layer da eseguire
         self.classifier = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, 256),
-            torch.nn.LayerNorm(256),  # Stabilizzatore
+            torch.nn.Linear(256, 256),
             torch.nn.ReLU(),
-            torch.nn.Dropout(0.1),
-            torch.nn.Linear(256, num_labels)
+            torch.nn.Linear(256, 64),
+            torch.nn.ReLU(),
+            torch.nn.Linear(64, num_labels)
         )
 
     def forward(self,input_ids,attention_mask):
